@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# rootkey 本地管理工具启动脚本
+set -e
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JAR="$SELF_DIR/../target/rootkey-toolkit.jar"
+if [ ! -f "$JAR" ]; then
+  echo "未找到 $JAR，请先在项目根目录执行: mvn -q package" >&2
+  exit 1
+fi
+exec java -jar "$JAR" "$@"

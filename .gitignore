@@ -1,0 +1,9 @@
+target/
+*.comp
+manifest.properties
+rootkey-components/
+secrets/
+demo-secrets/
+.idea/
+*.iml
+.DS_Store
