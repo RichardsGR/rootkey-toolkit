@@ -20,7 +20,7 @@ jpackage \
   --input "$STAGE" \
   --main-jar rootkey-toolkit.jar \
   --main-class com.metrace.rootkey.client.RootKeyClient \
-  --app-version 1.0.0 \
+  --app-version 2.0.0 \
   --vendor metrace \
   --dest dist
 

@@ -6,7 +6,7 @@ package com.metrace.rootkey;
 public final class RootKeyConstants {
 
     /** 工具版本号 */
-    public static final String TOOL_VERSION = "1.0.0";
+    public static final String TOOL_VERSION = "2.0.0";
 
     /** 根密钥长度：32 字节 = 256 位（AES-256） */
     public static final int ROOT_KEY_LENGTH_BYTES = 32;

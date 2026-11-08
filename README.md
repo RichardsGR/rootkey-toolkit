@@ -97,14 +97,14 @@ Maven 本地安装后依赖，或直接把 `target/rootkey-toolkit.jar` 放入 c
 
 ```bash
 mvn install:install-file -Dfile=target/rootkey-toolkit.jar -DgroupId=com.metrace \
-    -DartifactId=rootkey-toolkit -Dversion=1.0.0 -Dpackaging=jar
+    -DartifactId=rootkey-toolkit -Dversion=2.0.0 -Dpackaging=jar
 ```
 
 ```xml
 <dependency>
     <groupId>com.metrace</groupId>
     <artifactId>rootkey-toolkit</artifactId>
-    <version>1.0.0</version>
+    <version>2.0.0</version>
 </dependency>
 ```
 
