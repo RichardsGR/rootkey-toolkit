@@ -183,6 +183,19 @@ class CoreRoundTripTest {
     }
 
     @Test
+    void nullOrEmptyKeyIdFallsBackToDefault(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        // null / 纯空白 keyId：都必须落到 SDK 兜底的 rk-时间戳 keyId（回归：Web 端传空串曾报「非法 keyId」）
+        try (RootKeyGenerator.GenerateResult r =
+                     RootKeyGenerator.generate(dir.resolve("n"), null, false)) {
+            assertTrue(r.keyId().startsWith("rk-"), "null keyId 应兜底为 rk-*，实际: " + r.keyId());
+        }
+        try (RootKeyGenerator.GenerateResult r2 =
+                     RootKeyGenerator.generate(dir.resolve("e"), "   ", false)) {
+            assertTrue(r2.keyId().startsWith("rk-"), "空白 keyId 应兜底为 rk-*，实际: " + r2.keyId());
+        }
+    }
+
+    @Test
     void manifestKcvMatchesRestore(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
         try (RootKeyGenerator.GenerateResult r = RootKeyGenerator.generate(dir, "mani-key", false)) {
             Properties manifest = new Properties();

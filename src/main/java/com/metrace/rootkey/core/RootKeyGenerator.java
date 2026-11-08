@@ -94,6 +94,10 @@ public final class RootKeyGenerator {
         } catch (IOException e) {
             throw new RootKeyException("无法创建输出目录: " + outDir, e);
         }
+        // keyId 未提供时统一在 SDK 层兜底（CLI/Web/客户端三个入口共享此逻辑）
+        if (keyId == null || keyId.trim().isEmpty()) {
+            keyId = defaultKeyId();
+        }
 
         List<Path> paths = new ArrayList<Path>();
         for (char label : RootKeyConstants.COMPONENT_LABELS) {
