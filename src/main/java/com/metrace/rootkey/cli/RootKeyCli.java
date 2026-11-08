@@ -248,7 +248,7 @@ public final class RootKeyCli {
 
     private static int cmdWorkKey(String[] args) throws IOException {
         if (args.length == 0) {
-            throw new UsageException("workkey 需要 gen / restore / encrypt / decrypt 子命令");
+            throw new UsageException("workkey 需要 gen / restore / encrypt / decrypt / list 子命令");
         }
         String sub = args[0];
         String[] rest = Arrays.copyOfRange(args, 1, args.length);
@@ -261,10 +261,13 @@ public final class RootKeyCli {
         if ("encrypt".equals(sub) || "decrypt".equals(sub)) {
             return wkCrypt(sub, rest);
         }
+        if ("list".equals(sub)) {
+            return wkList(rest);
+        }
         throw new UsageException("未知 workkey 子命令: " + sub);
     }
 
-    /** workkey gen：位置参数 = 根密钥组件（目录或 4 文件），选项 --name --out --force */
+    /** workkey gen：位置参数 = 根密钥组件（目录或 4 文件），选项 --name --out --force；文件已存在则为追加 */
     private static int wkGenerate(String[] args) throws IOException {
         String name = null;
         String out = null;
@@ -298,19 +301,23 @@ public final class RootKeyCli {
             System.out.println("  KCV     : " + g.kcvHex());
             System.out.println("  文件    : " + g.file());
             System.out.println("  根密钥  : keyId=" + root.keyId() + ", KCV=" + root.kcv());
-            System.out.println("该 .workkey 文件可放入业务侧；没有根密钥四组件无法还原其中的密钥。");
+            System.out.println("  文件内现有密钥: " + g.namesInFile());
+            System.out.println("该 .json 文件可放入业务侧（可存多个工作密钥）；没有根密钥四组件无法还原。");
         }
         return 0;
     }
 
-    /** workkey restore：位置参数 = 根密钥组件，选项 --workkey <文件> */
+    /** workkey restore：位置参数 = 根密钥组件，选项 --workkey <文件> [--name <名称>] */
     private static int wkRestore(String[] args) throws IOException {
         String wk = null;
+        String name = null;
         List<String> positional = new ArrayList<String>();
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
             if ("--workkey".equals(a)) {
                 wk = requireValue(args, ++i, a);
+            } else if ("--name".equals(a)) {
+                name = requireValue(args, ++i, a);
             } else if (a.startsWith("--")) {
                 throw new UsageException("workkey restore 不认识参数: " + a);
             } else {
@@ -319,7 +326,7 @@ public final class RootKeyCli {
         }
         try (RootKeyManager root = new RootKeyManager(rootConfigFromPositional(positional, "workkey restore"));
              com.metrace.rootkey.workkey.WorkKeySecret s =
-                     com.metrace.rootkey.workkey.WorkKeyManager.restore(Paths.get(wk), root)) {
+                     com.metrace.rootkey.workkey.WorkKeyManager.restore(Paths.get(wk), name, root)) {
             System.out.println("工作密钥还原成功（密钥本体不会输出）");
             System.out.println("  名称      : " + s.name());
             System.out.println("  KCV       : " + s.kcvHex());
@@ -328,11 +335,12 @@ public final class RootKeyCli {
         return 0;
     }
 
-    /** workkey encrypt/decrypt：位置参数 = 根密钥组件，选项 --workkey --in --out --base64 */
+    /** workkey encrypt/decrypt：位置参数 = 根密钥组件，选项 --workkey [--name] --in --out --base64 */
     private static int wkCrypt(String sub, String[] args) throws IOException {
         String in = null;
         String out = null;
         String wk = null;
+        String name = null;
         boolean base64 = false;
         List<String> positional = new ArrayList<String>();
         for (int i = 0; i < args.length; i++) {
@@ -343,6 +351,8 @@ public final class RootKeyCli {
                 out = requireValue(args, ++i, a);
             } else if ("--workkey".equals(a)) {
                 wk = requireValue(args, ++i, a);
+            } else if ("--name".equals(a)) {
+                name = requireValue(args, ++i, a);
             } else if ("--base64".equals(a)) {
                 base64 = true;
             } else if (a.startsWith("--")) {
@@ -355,7 +365,7 @@ public final class RootKeyCli {
         byte[] input = readInput(in);
         try (RootKeyManager root = new RootKeyManager(rootConfigFromPositional(positional, "workkey " + sub));
              com.metrace.rootkey.workkey.WorkKeyManager wkm =
-                     new com.metrace.rootkey.workkey.WorkKeyManager(root, Paths.get(wk))) {
+                     new com.metrace.rootkey.workkey.WorkKeyManager(root, Paths.get(wk), name)) {
             byte[] data;
             if (isEncrypt) {
                 data = wkm.encrypt(input);
@@ -366,6 +376,28 @@ public final class RootKeyCli {
             writeOutput(out, data, isEncrypt && base64);
             System.err.println("[INFO] 工作密钥" + (isEncrypt ? "加密" : "解密") + "完成 (name="
                     + wkm.name() + ", KCV=" + wkm.kcv() + ", " + input.length + " 字节输入)");
+        }
+        return 0;
+    }
+
+    /** workkey list：列出 .json 文件内全部工作密钥（名称/KCV，无需根密钥） */
+    private static int wkList(String[] args) throws IOException {
+        String wk = null;
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
+            if ("--workkey".equals(a)) {
+                wk = requireValue(args, ++i, a);
+            } else {
+                throw new UsageException("workkey list 只支持 --workkey <文件>");
+            }
+        }
+        com.metrace.rootkey.workkey.WorkKeyFile f =
+                com.metrace.rootkey.workkey.WorkKeyFile.load(Paths.get(wk));
+        System.out.println("文件    : " + Paths.get(wk).toAbsolutePath().normalize());
+        System.out.println("根密钥  : keyId=" + f.rootKeyId() + ", KCV=" + f.rootKcvHex());
+        System.out.println("密钥数  : " + f.keyCount());
+        for (com.metrace.rootkey.workkey.WorkKeyFile.Entry e : f.entries()) {
+            System.out.println("  - " + e.name() + "  (KCV=" + e.kcvHex() + ")");
         }
         return 0;
     }
@@ -437,7 +469,7 @@ public final class RootKeyCli {
     }
 
     /**
-     * 解析组件位置：1 个参数视为目录（内含 a/b/c/d.comp），4 个参数视为四个文件。
+     * 解析组件位置：1 个参数视为目录（内含 a/b/c/d.txt），4 个参数视为四个文件。
      */
     private static List<Path> resolveComponents(List<String> positional, String cmd) {
         if (positional.size() != 1 && positional.size() != 4) {
@@ -531,11 +563,14 @@ public final class RootKeyCli {
         ps.println("  rootkey client");
         ps.println("        打开桌面客户端窗口（Swing 图形界面，内部直接调用 SDK）");
         ps.println("  rootkey workkey gen --name <名称> [--out <文件>] [--force] <根密钥组件>");
-        ps.println("        生成工作密钥并用根密钥加密落盘为 .workkey 文件（信封加密）");
-        ps.println("  rootkey workkey restore --workkey <文件> <根密钥组件>");
-        ps.println("        用根密钥还原工作密钥并自校验（只显示 KCV）");
-        ps.println("  rootkey workkey encrypt/decrypt --workkey <文件> <根密钥组件>");
+        ps.println("        生成工作密钥并用根密钥加密写入 .json 文件（信封加密）");
+        ps.println("        同一文件可存多个工作密钥：文件已存在时为追加，同名条目需 --force 覆盖");
+        ps.println("  rootkey workkey restore --workkey <文件> [--name <名称>] <根密钥组件>");
+        ps.println("        用根密钥还原工作密钥并自校验（只显示 KCV；文件内仅一个密钥时可省略 --name）");
+        ps.println("  rootkey workkey encrypt/decrypt --workkey <文件> [--name <名称>] <根密钥组件>");
         ps.println("        用工作密钥加解密（AES-256-GCM，选项同根密钥加解密）");
+        ps.println("  rootkey workkey list --workkey <文件>");
+        ps.println("        列出文件内全部工作密钥（名称/KCV，无需根密钥）");
         ps.println();
         ps.println("选项:");
         ps.println("  --in      输入文件，\"-\" 或省略表示标准输入");

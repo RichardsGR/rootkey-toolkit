@@ -9,6 +9,7 @@ import com.metrace.rootkey.core.RootKeyGenerator;
 import com.metrace.rootkey.core.RootKeyRestorer;
 import com.metrace.rootkey.core.RootKeySecret;
 import com.metrace.rootkey.internal.Codec;
+import com.metrace.rootkey.internal.Json;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -220,35 +221,43 @@ public final class WebUiServer {
         try (RootKeyManager root = new RootKeyManager(cfg);
              com.metrace.rootkey.workkey.WorkKeyManager.Generated g =
                      com.metrace.rootkey.workkey.WorkKeyManager.generate(outFile, name.trim(), root, force)) {
+            StringBuilder names = new StringBuilder();
+            for (String n : g.namesInFile()) {
+                if (names.length() > 0) {
+                    names.append(',');
+                }
+                names.append('"').append(Json.escape(n)).append('"');
+            }
             sendJson(ex, 200, "{\"ok\":true,\"name\":\"" + Json.escape(g.name())
                     + "\",\"kcv\":\"" + g.kcvHex()
                     + "\",\"file\":\"" + Json.escape(g.file().toString())
                     + "\",\"rootKeyId\":\"" + Json.escape(root.keyId())
-                    + "\",\"rootKcv\":\"" + root.kcv() + "\"}");
+                    + "\",\"rootKcv\":\"" + root.kcv()
+                    + "\",\"namesInFile\":[" + names + "]}");
         }
     }
 
-    /** POST /api/workkey/restore {dir|a-d, workkey} */
+    /** POST /api/workkey/restore {dir|a-d, workkey, name?} */
     private void handleWkRestore(HttpExchange ex, Map<String, String> p) throws IOException {
         RootKeyConfig cfg = configFrom(p);
         String wk = requireParam(p, "workkey");
         try (RootKeyManager root = new RootKeyManager(cfg);
              com.metrace.rootkey.workkey.WorkKeySecret s =
-                     com.metrace.rootkey.workkey.WorkKeyManager.restore(Paths.get(wk), root)) {
+                     com.metrace.rootkey.workkey.WorkKeyManager.restore(Paths.get(wk), p.get("name"), root)) {
             sendJson(ex, 200, "{\"ok\":true,\"name\":\"" + Json.escape(s.name())
                     + "\",\"kcv\":\"" + s.kcvHex()
                     + "\",\"rootKeyId\":\"" + Json.escape(root.keyId()) + "\"}");
         }
     }
 
-    /** POST /api/workkey/encrypt {dir|a-d, workkey, plaintext} / decrypt {..., ciphertextB64} */
+    /** POST /api/workkey/encrypt {dir|a-d, workkey, name?, plaintext} / decrypt {..., ciphertextB64} */
     private void handleWkCrypt(HttpExchange ex, Map<String, String> p) throws IOException {
         boolean isEncrypt = ex.getRequestURI().getPath().endsWith("/encrypt");
         RootKeyConfig cfg = configFrom(p);
         String wk = requireParam(p, "workkey");
         try (RootKeyManager root = new RootKeyManager(cfg);
              com.metrace.rootkey.workkey.WorkKeyManager wkm =
-                     new com.metrace.rootkey.workkey.WorkKeyManager(root, Paths.get(wk))) {
+                     new com.metrace.rootkey.workkey.WorkKeyManager(root, Paths.get(wk), p.get("name"))) {
             if (isEncrypt) {
                 String plaintext = p.get("plaintext");
                 if (plaintext == null) {
@@ -308,7 +317,7 @@ public final class WebUiServer {
         void handle(HttpExchange ex, Map<String, String> params) throws IOException;
     }
 
-    /** 解析组件位置：{dir} → dir/{a,b,c,d}.comp；或显式 {a,b,c,d} 四个路径（不做存在性检查） */
+    /** 解析组件位置：{dir} → dir/{a,b,c,d}.txt；或显式 {a,b,c,d} 四个路径（不做存在性检查） */
     private static List<Path> componentPaths(Map<String, String> p) {
         List<Path> paths = new ArrayList<Path>();
         String dir = p.get("dir");

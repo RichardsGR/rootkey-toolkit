@@ -16,10 +16,10 @@ import java.util.Properties;
  *
  * <p>配置文件（properties 格式）示例：</p>
  * <pre>
- *   rootkey.component.a.path=/etc/rootkey/a.comp
- *   rootkey.component.b.path=/etc/rootkey/b.comp
- *   rootkey.component.c.path=/etc/rootkey/c.comp
- *   rootkey.component.d.path=/etc/rootkey/d.comp
+ *   rootkey.component.a.path=/etc/rootkey/a.txt
+ *   rootkey.component.b.path=/etc/rootkey/b.txt
+ *   rootkey.component.c.path=/etc/rootkey/c.txt
+ *   rootkey.component.d.path=/etc/rootkey/d.txt
  * </pre>
  *
  * <p>优先级（高到低）：JVM 系统属性 &gt; 环境变量 &gt; 配置文件。

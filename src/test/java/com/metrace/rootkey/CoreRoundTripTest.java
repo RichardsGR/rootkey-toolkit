@@ -55,8 +55,8 @@ class CoreRoundTripTest {
         // 连续还原 3 次，结果完全一致
         for (int i = 0; i < 3; i++) {
             RootKeySecret s = RootKeyRestorer.restore(
-                    dir.resolve("a.comp"), dir.resolve("b.comp"),
-                    dir.resolve("c.comp"), dir.resolve("d.comp"));
+                    dir.resolve("a.txt"), dir.resolve("b.txt"),
+                    dir.resolve("c.txt"), dir.resolve("d.txt"));
             assertEquals(expectedKcv, s.kcvHex());
             assertArrayEquals(expectedKey, s.exportKey());
             s.destroy();
@@ -66,10 +66,10 @@ class CoreRoundTripTest {
     @Test
     void encryptDecryptRoundTripBinaryAndText(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
         Properties props = new Properties();
-        props.setProperty(RootKeyConfig.KEY_A, dir.resolve("a.comp").toString());
-        props.setProperty(RootKeyConfig.KEY_B, dir.resolve("b.comp").toString());
-        props.setProperty(RootKeyConfig.KEY_C, dir.resolve("c.comp").toString());
-        props.setProperty(RootKeyConfig.KEY_D, dir.resolve("d.comp").toString());
+        props.setProperty(RootKeyConfig.KEY_A, dir.resolve("a.txt").toString());
+        props.setProperty(RootKeyConfig.KEY_B, dir.resolve("b.txt").toString());
+        props.setProperty(RootKeyConfig.KEY_C, dir.resolve("c.txt").toString());
+        props.setProperty(RootKeyConfig.KEY_D, dir.resolve("d.txt").toString());
         try (RootKeyGenerator.GenerateResult ignored = RootKeyGenerator.generate(dir, "enc-key", false)) {
             try (RootKeyManager km = RootKeyManager.fromProperties(props)) {
                 // 二进制
@@ -89,8 +89,8 @@ class CoreRoundTripTest {
     void freshCiphertextEachTimeButAllDecrypt(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
         try (RootKeyGenerator.GenerateResult ignored = RootKeyGenerator.generate(dir, "iv-key", false)) {
             RootKeyConfig cfg = RootKeyConfig.builder()
-                    .a(dir.resolve("a.comp")).b(dir.resolve("b.comp"))
-                    .c(dir.resolve("c.comp")).d(dir.resolve("d.comp")).build();
+                    .a(dir.resolve("a.txt")).b(dir.resolve("b.txt"))
+                    .c(dir.resolve("c.txt")).d(dir.resolve("d.txt")).build();
             try (RootKeyManager km = new RootKeyManager(cfg)) {
                 byte[] pt = "same plaintext".getBytes(StandardCharsets.UTF_8);
                 byte[] c1 = km.encrypt(pt);
@@ -105,7 +105,7 @@ class CoreRoundTripTest {
     @Test
     void tamperedComponentFileRejected(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
         RootKeyGenerator.generate(dir, "tamper-key", false).close();
-        Path aFile = dir.resolve("a.comp");
+        Path aFile = dir.resolve("a.txt");
         String content = new String(Files.readAllBytes(aFile), StandardCharsets.UTF_8);
         // 篡改 material 的一个字符（保持 Base64 合法）
         String tampered = content.replaceAll("(?m)^material=(.{6})", "material=XXXXXX");
@@ -123,8 +123,8 @@ class CoreRoundTripTest {
         // 混入另一批次的组件 → KCV 校验必须失败
         RootKeyException ex = assertThrows(RootKeyException.class, () ->
                 RootKeyRestorer.restore(
-                        dir.resolve("a.comp"), other.resolve("b.comp"),
-                        dir.resolve("c.comp"), dir.resolve("d.comp")));
+                        dir.resolve("a.txt"), other.resolve("b.txt"),
+                        dir.resolve("c.txt"), dir.resolve("d.txt")));
         assertTrue(ex.getMessage().contains("KCV") || ex.getMessage().contains("keyId"), ex.getMessage());
     }
 
@@ -133,8 +133,8 @@ class CoreRoundTripTest {
         RootKeyGenerator.generate(dir, "dup-key", false).close();
         RootKeyException ex = assertThrows(RootKeyException.class, () ->
                 RootKeyRestorer.restore(
-                        dir.resolve("a.comp"), dir.resolve("a.comp"),
-                        dir.resolve("b.comp"), dir.resolve("c.comp")));
+                        dir.resolve("a.txt"), dir.resolve("a.txt"),
+                        dir.resolve("b.txt"), dir.resolve("c.txt")));
         assertTrue(ex.getMessage().contains("标签"), ex.getMessage());
     }
 
@@ -142,8 +142,8 @@ class CoreRoundTripTest {
     void corruptedCiphertextRejected(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
         try (RootKeyGenerator.GenerateResult ignored = RootKeyGenerator.generate(dir, "gcm-key", false)) {
             RootKeyConfig cfg = RootKeyConfig.builder()
-                    .a(dir.resolve("a.comp")).b(dir.resolve("b.comp"))
-                    .c(dir.resolve("c.comp")).d(dir.resolve("d.comp")).build();
+                    .a(dir.resolve("a.txt")).b(dir.resolve("b.txt"))
+                    .c(dir.resolve("c.txt")).d(dir.resolve("d.txt")).build();
             try (RootKeyManager km = new RootKeyManager(cfg)) {
                 byte[] ct = km.encrypt("hello".getBytes(StandardCharsets.UTF_8));
                 ct[ct.length - 1] ^= 0x01; // 翻转密文最后一个比特
@@ -158,10 +158,10 @@ class CoreRoundTripTest {
         try (RootKeyGenerator.GenerateResult ignored = RootKeyGenerator.generate(dir, "cfg-key", false)) {
             Path cfgFile = dir.resolve("rootkey.properties");
             Properties props = new Properties();
-            props.setProperty(RootKeyConfig.KEY_A, dir.resolve("a.comp").toString());
-            props.setProperty(RootKeyConfig.KEY_B, dir.resolve("b.comp").toString());
-            props.setProperty(RootKeyConfig.KEY_C, dir.resolve("c.comp").toString());
-            props.setProperty(RootKeyConfig.KEY_D, dir.resolve("d.comp").toString());
+            props.setProperty(RootKeyConfig.KEY_A, dir.resolve("a.txt").toString());
+            props.setProperty(RootKeyConfig.KEY_B, dir.resolve("b.txt").toString());
+            props.setProperty(RootKeyConfig.KEY_C, dir.resolve("c.txt").toString());
+            props.setProperty(RootKeyConfig.KEY_D, dir.resolve("d.txt").toString());
             try (java.io.Writer w = Files.newBufferedWriter(cfgFile, StandardCharsets.UTF_8)) {
                 props.store(w, "test");
             }
@@ -170,7 +170,7 @@ class CoreRoundTripTest {
                 assertEquals("cfg-key", km.keyId());
             }
             // 系统属性覆盖：把 a 指向 b 的文件 → 标签校验失败（证明覆盖生效）
-            System.setProperty(RootKeyConfig.KEY_A, dir.resolve("b.comp").toString());
+            System.setProperty(RootKeyConfig.KEY_A, dir.resolve("b.txt").toString());
             try {
                 try (RootKeyManager km = RootKeyManager.fromConfigFile(cfgFile)) {
                     RootKeyException ex = assertThrows(RootKeyException.class, km::keyId);
@@ -203,8 +203,8 @@ class CoreRoundTripTest {
                 manifest.load(reader);
             }
             RootKeySecret s = RootKeyRestorer.restore(
-                    dir.resolve("a.comp"), dir.resolve("b.comp"),
-                    dir.resolve("c.comp"), dir.resolve("d.comp"));
+                    dir.resolve("a.txt"), dir.resolve("b.txt"),
+                    dir.resolve("c.txt"), dir.resolve("d.txt"));
             assertEquals(manifest.getProperty("kcv").toLowerCase(), s.kcvHex());
             s.destroy();
         }

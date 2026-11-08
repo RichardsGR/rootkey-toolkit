@@ -28,8 +28,8 @@ class StabilityTest {
         }
         for (int i = 0; i < 200; i++) {
             RootKeySecret s = RootKeyRestorer.restore(
-                    dir.resolve("a.comp"), dir.resolve("b.comp"),
-                    dir.resolve("c.comp"), dir.resolve("d.comp"));
+                    dir.resolve("a.txt"), dir.resolve("b.txt"),
+                    dir.resolve("c.txt"), dir.resolve("d.txt"));
             assertEquals(expectedKcv, s.kcvHex(), "第 " + i + " 次 KCV 不一致");
             if (!Arrays.equals(expectedKey, s.exportKey())) {
                 fail("第 " + i + " 次还原的根密钥不一致");
@@ -42,8 +42,8 @@ class StabilityTest {
     void crossManagerEncryptDecrypt(@TempDir Path dir) throws Exception {
         try (RootKeyGenerator.GenerateResult ignored = RootKeyGenerator.generate(dir, "cross-key", false)) {
             RootKeyConfig cfg = RootKeyConfig.builder()
-                    .a(dir.resolve("a.comp")).b(dir.resolve("b.comp"))
-                    .c(dir.resolve("c.comp")).d(dir.resolve("d.comp")).build();
+                    .a(dir.resolve("a.txt")).b(dir.resolve("b.txt"))
+                    .c(dir.resolve("c.txt")).d(dir.resolve("d.txt")).build();
             byte[] pt = "跨实例解密".getBytes(StandardCharsets.UTF_8);
             byte[] ct;
             try (RootKeyManager producer = new RootKeyManager(cfg)) {
@@ -63,8 +63,8 @@ class StabilityTest {
         String b64;
         try (RootKeyGenerator.GenerateResult ignored = RootKeyGenerator.generate(dir, "reboot-key", false)) {
             cfg = RootKeyConfig.builder()
-                    .a(dir.resolve("a.comp")).b(dir.resolve("b.comp"))
-                    .c(dir.resolve("c.comp")).d(dir.resolve("d.comp")).build();
+                    .a(dir.resolve("a.txt")).b(dir.resolve("b.txt"))
+                    .c(dir.resolve("c.txt")).d(dir.resolve("d.txt")).build();
         }
         try (RootKeyManager km = new RootKeyManager(cfg)) {
             b64 = km.encryptToBase64("重启后仍可解密");

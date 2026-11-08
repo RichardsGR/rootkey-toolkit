@@ -1,6 +1,6 @@
 package com.metrace.rootkey;
 
-import com.metrace.rootkey.webui.Json;
+import com.metrace.rootkey.internal.Json;
 import com.metrace.rootkey.webui.WebUiServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,7 +35,7 @@ class WebUiServerTest {
             assertTrue(Boolean.parseBoolean(gen.get("ok")), "generate 应成功: " + gen.get("error"));
             assertEquals("web-test", gen.get("keyId"));
             assertEquals(16, gen.get("kcv").length());
-            assertTrue(Files.exists(dir.resolve("a.comp")));
+            assertTrue(Files.exists(dir.resolve("a.txt")));
 
             // 校验
             Map<String, String> verify = Json.parseFlatObject(post(base + "/api/verify",
@@ -109,7 +109,7 @@ class WebUiServerTest {
             assertTrue(Boolean.parseBoolean(gen.get("ok")), "workkey generate 应成功: " + gen.get("error"));
             assertEquals("order-db", gen.get("name"));
             assertEquals("http-wk-root", gen.get("rootKeyId"));
-            assertTrue(Files.exists(dir.resolve("order-db.workkey")));
+            assertTrue(Files.exists(dir.resolve("order-db.json")));
 
             // 还原校验
             Map<String, String> res = Json.parseFlatObject(post(base + "/api/workkey/restore",

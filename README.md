@@ -25,10 +25,10 @@ mvn -q package          # 构建，产物 target/rootkey-toolkit.jar（SDK + CLI
 
 ```
 secrets/
-├── a.comp   # 组件 a（32 字节随机材料）
-├── b.comp   # 组件 b（32 字节随机材料）
-├── c.comp   # 组件 c（32 字节随机材料）
-├── d.comp   # 组件 d（= root ⊕ a ⊕ b ⊕ c）
+├── a.txt   # 组件 a（32 字节随机材料）
+├── b.txt   # 组件 b（32 字节随机材料）
+├── c.txt   # 组件 c（32 字节随机材料）
+├── d.txt   # 组件 d（= root ⊕ a ⊕ b ⊕ c）
 └── manifest.properties   # keyId / KCV 等信息文件（不参与还原）
 ```
 
@@ -80,13 +80,13 @@ Linux/Windows 同理：改 `jpackage --type` 为 `deb`/`rpm`/`msi` 即可。打�
 
 ### 5. 分发到服务器
 
-将 `a/b/c/d.comp` 四个文件**分别**通过安全渠道放到服务器的不同位置（建议不同目录、不同权限，甚至不同挂载点/密管系统），例如：
+将 `a/b/c/d.txt` 四个文件**分别**通过安全渠道放到服务器的不同位置（建议不同目录、不同权限，甚至不同挂载点/密管系统），例如：
 
 ```
-/etc/rootkey/a.comp
-/var/lib/app/keys/b.comp
-/srv/secrets/c.comp
-/opt/share/d.comp
+/etc/rootkey/a.txt
+/var/lib/app/keys/b.txt
+/srv/secrets/c.txt
+/opt/share/d.txt
 ```
 
 ## 三、服务器 SDK 集成
@@ -113,10 +113,10 @@ mvn install:install-file -Dfile=target/rootkey-toolkit.jar -DgroupId=com.metrace
 `/etc/app/rootkey.properties`：
 
 ```properties
-rootkey.component.a.path=/etc/rootkey/a.comp
-rootkey.component.b.path=/var/lib/app/keys/b.comp
-rootkey.component.c.path=/srv/secrets/c.comp
-rootkey.component.d.path=/opt/share/d.comp
+rootkey.component.a.path=/etc/rootkey/a.txt
+rootkey.component.b.path=/var/lib/app/keys/b.txt
+rootkey.component.c.path=/srv/secrets/c.txt
+rootkey.component.d.path=/opt/share/d.txt
 ```
 
 优先级：**系统属性 > 环境变量 > 配置文件**。环境变量命名：点号转下划线并大写，如
@@ -151,38 +151,63 @@ public RootKeyManager rootKeyManager() throws Exception {
 SecureRandom → WorkKey(32B)            RootKey组件(4份) ─┐
      │  立即用 RootKey 加密                               ├→ 还原 WorkKey 到内存
      ▼                                                   │   ↓ AES-256-GCM
-order-db.workkey 文件 ──── 可安全分发到业务侧 ────────────┘   加解密业务数据
+order-db.json 文件 ──── 可安全分发到业务侧 ────────────┘   加解密业务数据
 ```
+
+### 工作密钥文件（JSON，多密钥容器）
+
+一个 `.json` 文件可存放**多个**工作密钥，按名称区分：
+
+```json
+{
+  "version": 1,
+  "rootKeyId": "biz-root-2026",
+  "rootKcv": "508b80c51600a0e4",
+  "keys": [
+    { "name": "order-db",   "algorithm": "AES", "kcv": "...", "wrapped": "...", "checksum": "..." },
+    { "name": "user-token", "algorithm": "AES", "kcv": "...", "wrapped": "...", "checksum": "..." }
+  ]
+}
+```
+
+每个条目的 `checksum` 覆盖 name/rootKeyId/rootKcv/kcv/wrapped，任何篡改都会在加载时被发现。
 
 ### CLI
 
 ```bash
-# 生成工作密钥（指定名称），立即用根密钥加密落盘
-rootkey workkey gen --name order-db --out order-db.workkey ./secrets
+# 生成（指定名称），立即用根密钥加密写入 .json 文件
+rootkey workkey gen --name order-db --out keys.json ./secrets
 
-# 还原自校验（只显示 KCV）
-rootkey workkey restore --workkey order-db.workkey ./secrets
+# 同一文件再生成一个 → 追加；同名条目需 --force 覆盖
+rootkey workkey gen --name user-token --out keys.json ./secrets
+
+# 列出文件内全部工作密钥（无需根密钥）
+rootkey workkey list --workkey keys.json
+
+# 还原自校验（只显示 KCV；文件内仅一个密钥时可省略 --name）
+rootkey workkey restore --workkey keys.json --name order-db ./secrets
 
 # 用工作密钥加解密（AES-256-GCM）
-echo -n '数据' | rootkey workkey encrypt --workkey order-db.workkey ./secrets --base64
-rootkey workkey decrypt --workkey order-db.workkey ./secrets --in ct.b64 --base64
+echo -n '数据' | rootkey workkey encrypt --workkey keys.json --name order-db ./secrets --base64
+rootkey workkey decrypt --workkey keys.json --name order-db ./secrets --in ct.b64 --base64
 ```
 
 ### SDK API
 
 ```java
-// 业务侧：根据根密钥配置 + WorkKey 文件路径，直接还原到内存使用
+// 业务侧：根据根密钥配置 + 工作密钥文件路径 + 名称，直接还原到内存使用
 try (RootKeyManager root = RootKeyManager.fromConfigFile(Paths.get("/etc/app/rootkey.properties"));
-     WorkKeyManager wk = new WorkKeyManager(root, Paths.get("/data/keys/order-db.workkey"))) {
+     WorkKeyManager wk = new WorkKeyManager(root, Paths.get("/data/keys/keys.json"), "order-db")) {
     String ct = wk.encryptToBase64("订单敏感字段");   // AES-256-GCM
     String pt = wk.decryptFromBase64(ct);
 }
+// 文件内只有一个密钥时，名称可传 null
 ```
 
 `WorkKeyManager` 惰性还原并缓存（线程安全），`close()` 销毁内存密钥。还原时依次校验：
 文件 checksum → 根密钥归属（rootKeyId/rootKcv，拿错根密钥会给出明确报错而非晦涩的 GCM 错误）→ GCM 认证标签 → WorkKey KCV 自证。
 
-`.workkey` 文件只含被根密钥加密后的密钥材料，**泄露它不直接泄露密钥**（没有四组件还原不出 WorkKey），但仍请妥善保管；文件权限默认 600。
+`.json` 文件只含被根密钥加密后的密钥材料，**泄露它不直接泄露密钥**（没有四组件还原不出 WorkKey），但仍请妥善保管；文件权限默认 600。
 
 Web 管理台（`rootkey ui`）与桌面客户端（`rootkey client`）同样提供了工作密钥的图形化页签：生成（可指定名称）、还原校验、加解密，行为与 CLI 完全一致。
 

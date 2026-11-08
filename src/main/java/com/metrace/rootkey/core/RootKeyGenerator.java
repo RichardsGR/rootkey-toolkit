@@ -173,7 +173,7 @@ public final class RootKeyGenerator {
 
     private static byte[] manifestBytes(Properties props) {
         StringBuilder sb = new StringBuilder();
-        sb.append("# RootKey manifest（信息文件，不参与还原；还原仅需 4 个 .comp 组件文件）\n");
+        sb.append("# RootKey manifest（信息文件，不参与还原；还原仅需 4 个 .txt 组件文件）\n");
         for (String k : new String[]{"keyId", "algorithm", "shareScheme", "kcv", "createdAt", "toolVersion"}) {
             sb.append(k).append('=').append(props.getProperty(k)).append('\n');
         }

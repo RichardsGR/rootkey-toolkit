@@ -20,8 +20,8 @@ public final class RootKeyConstants {
     /** 组件文件格式版本 */
     public static final int FILE_FORMAT_VERSION = 1;
 
-    /** 组件文件的默认扩展名 */
-    public static final String COMPONENT_FILE_SUFFIX = ".comp";
+    /** 组件文件的默认扩展名（根密钥材料以 .txt 文本文件承载） */
+    public static final String COMPONENT_FILE_SUFFIX = ".txt";
 
     /** 算法标识 */
     public static final String ALGORITHM = "AES";
@@ -30,8 +30,8 @@ public final class RootKeyConstants {
     public static final java.util.regex.Pattern NAME_PATTERN =
             java.util.regex.Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
 
-    /** 工作密钥文件的默认扩展名 */
-    public static final String WORKKEY_FILE_SUFFIX = ".workkey";
+    /** 工作密钥文件的默认扩展名（JSON 格式，一个文件可存多个工作密钥） */
+    public static final String WORKKEY_FILE_SUFFIX = ".json";
 
     private RootKeyConstants() {
     }

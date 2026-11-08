@@ -104,10 +104,10 @@
   <div class="card" id="tab-verify" style="display:none">
     <h2>校验与试还原</h2>
     <div class="desc">逐文件校验 checksum、标签一致性，并试还原显示 KCV。可用于核对服务器组件分发是否正确。</div>
-    <label>组件目录（内含 a.comp ~ d.comp），或四个文件路径</label>
+    <label>组件目录（内含 a.txt ~ d.txt），或四个文件路径</label>
     <input type="text" id="v-dir" placeholder="如 ./secrets">
     <label>（可选）四个文件路径，逗号分隔，优先于目录</label>
-    <input type="text" id="v-files" placeholder="/p/a.comp, /p/b.comp, /p/c.comp, /p/d.comp">
+    <input type="text" id="v-files" placeholder="/p/a.txt, /p/b.txt, /p/c.txt, /p/d.txt">
     <button class="btn" id="v-btn" onclick="doVerify()">校 验</button>
     <div class="result" id="v-result"></div>
   </div>
@@ -138,15 +138,15 @@
 <!-- 生成工作密钥 -->
   <div class="card" id="tab-wkgen" style="display:none">
     <h2>生成工作密钥（信封加密）</h2>
-    <div class="desc">随机生成 AES-256 工作密钥，立即用根密钥加密落盘；.workkey 文件可安全分发到业务侧。</div>
+    <div class="desc">随机生成 AES-256 工作密钥，立即用根密钥加密写入 .json 文件；同一文件可存多个工作密钥（再次生成即追加，同名覆盖请勾选强制）。</div>
     <label>根密钥组件目录</label>
     <input type="text" id="wg-root" placeholder="如 ./secrets">
     <label>工作密钥名称（必填）</label>
     <input type="text" id="wg-name" placeholder="如 order-db">
-    <label>输出文件（可选，默认 &lt;名称&gt;.workkey）</label>
-    <input type="text" id="wg-out" placeholder="如 ./keys/order-db.workkey">
+    <label>输出文件（可选，默认 &lt;名称&gt;.json）</label>
+    <input type="text" id="wg-out" placeholder="如 ./keys/order-db.json">
     <div class="checkline">
-      <input type="checkbox" id="wg-force"> <span>目标文件已存在时覆盖</span>
+      <input type="checkbox" id="wg-force"> <span>文件内已存在同名密钥时覆盖</span>
     </div>
     <button class="btn" id="wg-btn" onclick="wkGenerate()">生 成</button>
     <div class="result" id="wg-result"></div>
@@ -155,11 +155,13 @@
   <!-- 工作密钥加解密 -->
   <div class="card" id="tab-wkcrypt" style="display:none">
     <h2>工作密钥加解密（AES-256-GCM）</h2>
-    <div class="desc">用根密钥还原 .workkey 到内存后加解密业务数据；结果会显示工作密钥名称与 KCV。</div>
+    <div class="desc">用根密钥还原 .json 文件中的工作密钥到内存后加解密业务数据；文件内有多个密钥时按名称选择。</div>
     <label>根密钥组件目录</label>
     <input type="text" id="wc-root" placeholder="如 ./secrets">
-    <label>工作密钥文件（.workkey）</label>
-    <input type="text" id="wc-file" placeholder="如 ./keys/order-db.workkey">
+    <label>工作密钥文件（.json，可存多个密钥）</label>
+    <input type="text" id="wc-file" placeholder="如 ./keys/order-db.json">
+    <label>密钥名称（文件内仅一个密钥时可留空）</label>
+    <input type="text" id="wc-name" placeholder="如 order-db">
     <button class="btn" id="wc-verify-btn" onclick="wkVerify()">还 原 校 验</button>
     <label>明文</label>
     <textarea id="wc-plain" placeholder="要加密的内容"></textarea>
@@ -337,7 +339,8 @@ async function wkGenerate() {
     let html = '';
     if (r.ok) {
       html += kcvBlock(r.name, r.kcv);
-      html += block('文件（可分发业务侧）', r.file, '', true);
+      html += block('文件（可分发业务侧，可存多个密钥）', r.file, '', true);
+      html += block('文件内现有密钥', (r.namesInFile || []).join('、'), '');
       html += block('加密它的根密钥', r.rootKeyId + ' · ' + r.rootKcv, '');
     } else {
       html = block('错误', r.error || '未知错误', 'err');
@@ -356,7 +359,8 @@ async function wkVerify() {
   try {
     const r = await api('/api/workkey/restore', {
       dir: document.getElementById('wc-root').value,
-      workkey: document.getElementById('wc-file').value
+      workkey: document.getElementById('wc-file').value,
+      name: document.getElementById('wc-name').value
     });
     document.getElementById('wc-dec-result').innerHTML = r.ok
       ? kcvBlock(r.name, r.kcv)
@@ -375,6 +379,7 @@ async function wkEncrypt() {
     const r = await api('/api/workkey/encrypt', {
       dir: document.getElementById('wc-root').value,
       workkey: document.getElementById('wc-file').value,
+      name: document.getElementById('wc-name').value,
       plaintext: document.getElementById('wc-plain').value
     });
     let html = r.ok
@@ -395,6 +400,7 @@ async function wkDecrypt() {
     const r = await api('/api/workkey/decrypt', {
       dir: document.getElementById('wc-root').value,
       workkey: document.getElementById('wc-file').value,
+      name: document.getElementById('wc-name').value,
       ciphertextB64: document.getElementById('wc-cipher').value
     });
     let html = r.ok

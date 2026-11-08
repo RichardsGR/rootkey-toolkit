@@ -3,12 +3,14 @@ package com.metrace.rootkey.workkey;
 import com.metrace.rootkey.RootKeyConstants;
 import com.metrace.rootkey.RootKeyException;
 import com.metrace.rootkey.internal.Codec;
+import com.metrace.rootkey.internal.Json;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,145 +19,191 @@ import java.util.Map;
 /**
  * 工作密钥文件：被根密钥加密后的 WorkKey 落盘载体（信封加密的"信封"）。
  *
- * <p>文件本身可以存放在业务侧——其中只有被 AES-256-GCM 加密的密钥材料，
- * 没有根密钥的四个组件无法还原。文件格式（UTF-8 文本，行式 key=value）：</p>
+ * <p>JSON 格式，一个文件可存放<b>多个</b>工作密钥。文件可存放在业务侧——
+ * 其中只有被 AES-256-GCM 加密的密钥材料，没有根密钥四组件无法还原：</p>
  *
  * <pre>
- *   version=1
- *   name=mydb-key              # 用户指定的工作密钥名称
- *   rootKeyId=order-2026       # 加密它的根密钥 keyId（归属核对）
- *   rootKcv=2df4d28e...        # 根密钥 KCV（核对用，不泄露密钥）
- *   algorithm=AES
- *   kcv=5c1e...                # 工作密钥自身的 KCV（还原后自证）
- *   wrapped=&lt;Base64(RK01信封：IV+GCM密文+Tag)，明文为 32 字节工作密钥&gt;
- *   checksum=&lt;64位十六进制，覆盖上述全部字段&gt;
+ * {
+ *   "version": 1,
+ *   "rootKeyId": "biz-root-2026",
+ *   "rootKcv": "508b80c5...",
+ *   "keys": [
+ *     { "name": "order-db", "algorithm": "AES", "kcv": "...", "wrapped": "...", "checksum": "..." }
+ *   ]
+ * }
  * </pre>
+ *
+ * <p>每个条目的 checksum 覆盖 name/rootKeyId/rootKcv/kcv/wrapped，
+ * 任何字段被篡改都会在加载时被发现。</p>
  */
 public final class WorkKeyFile {
 
     private final int version;
-    private final String name;
     private final String rootKeyId;
     private final String rootKcvHex;
-    private final String kcvHex;
-    private final byte[] wrapped;
+    private final List<Entry> keys;
 
-    private WorkKeyFile(int version, String name, String rootKeyId,
-                        String rootKcvHex, String kcvHex, byte[] wrapped) {
-        this.version = version;
-        this.name = name;
-        this.rootKeyId = rootKeyId;
-        this.rootKcvHex = rootKcvHex.toLowerCase();
-        this.kcvHex = kcvHex.toLowerCase();
-        this.wrapped = wrapped.clone();
+    /** 文件内的单个工作密钥条目 */
+    public static final class Entry {
+        private final String name;
+        private final String kcvHex;
+        private final byte[] wrapped;
+        private final String checksumHex;
+
+        private Entry(String name, String rootKeyId, String rootKcvHex, String kcvHex, byte[] wrapped) {
+            this.name = name;
+            this.kcvHex = kcvHex.toLowerCase();
+            this.wrapped = wrapped.clone();
+            // checksum 覆盖全部业务字段（含根密钥归属），改任何一处都会被发现
+            this.checksumHex = Codec.sha256Hex("1|" + name + "|" + rootKeyId + "|" + rootKcvHex.toLowerCase()
+                    + "|" + kcvHex.toLowerCase() + "|" + Codec.b64(wrapped));
+        }
+
+        private Entry(String name, String kcvHex, byte[] wrapped, String checksumHex) {
+            this.name = name;
+            this.kcvHex = kcvHex.toLowerCase();
+            this.wrapped = wrapped;
+            this.checksumHex = checksumHex;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        public String kcvHex() {
+            return kcvHex;
+        }
+
+        public byte[] wrapped() {
+            return wrapped.clone();
+        }
+
+        String checksumHex() {
+            return checksumHex;
+        }
+
+        Map<String, Object> toJson() {
+            Map<String, Object> m = new LinkedHashMap<String, Object>();
+            m.put("name", name);
+            m.put("algorithm", RootKeyConstants.ALGORITHM);
+            m.put("kcv", kcvHex);
+            m.put("wrapped", Codec.b64(wrapped));
+            m.put("checksum", checksumHex);
+            return m;
+        }
     }
 
-    public static WorkKeyFile create(String name, String rootKeyId, String rootKcvHex,
-                                     String kcvHex, byte[] wrapped) {
-        if (name == null || !RootKeyConstants.NAME_PATTERN.matcher(name).matches()) {
-            throw new RootKeyException("非法工作密钥名称: '" + name + "'（仅允许 1-64 位字母/数字/./_/-）");
-        }
+    private WorkKeyFile(int version, String rootKeyId, String rootKcvHex, List<Entry> keys) {
+        this.version = version;
+        this.rootKeyId = rootKeyId;
+        this.rootKcvHex = rootKcvHex.toLowerCase();
+        this.keys = keys;
+    }
+
+    /** 创建空文件对象（再通过 {@link #add} 追加条目） */
+    public static WorkKeyFile create(String rootKeyId, String rootKcvHex) {
+        validateRootFields(rootKeyId, rootKcvHex);
+        return new WorkKeyFile(RootKeyConstants.FILE_FORMAT_VERSION, rootKeyId, rootKcvHex,
+                new ArrayList<Entry>());
+    }
+
+    private static void validateRootFields(String rootKeyId, String rootKcvHex) {
         if (rootKeyId == null || !RootKeyConstants.NAME_PATTERN.matcher(rootKeyId).matches()) {
             throw new RootKeyException("非法 rootKeyId: '" + rootKeyId + "'");
         }
         if (rootKcvHex == null || !rootKcvHex.matches("^[0-9a-fA-F]{16}$")) {
             throw new RootKeyException("非法 rootKcv");
         }
+    }
+
+    /** 构造条目（自动计算 checksum） */
+    public static Entry entry(String name, String rootKeyId, String rootKcvHex, String kcvHex, byte[] wrapped) {
+        validateName(name);
         if (kcvHex == null || !kcvHex.matches("^[0-9a-fA-F]{16}$")) {
-            throw new RootKeyException("非法工作密钥 kcv");
+            throw new RootKeyException("非法工作密钥 kcv: '" + kcvHex + "'");
         }
         // 最小长度：RK01 信封 = 3B 头 + 12B IV + 16B Tag，密文体可为 0
         if (wrapped == null || wrapped.length < 31) {
             throw new RootKeyException("wrapped 密文长度非法（最小 31 字节）");
         }
-        return new WorkKeyFile(RootKeyConstants.FILE_FORMAT_VERSION, name, rootKeyId,
-                rootKcvHex, kcvHex, wrapped);
+        return new Entry(name, rootKeyId, rootKcvHex, kcvHex, wrapped);
     }
 
-    /** 从文件加载并完整校验（格式/长度/checksum） */
-    public static WorkKeyFile load(Path path) {
-        List<String> lines;
-        try {
-            lines = Files.readAllLines(path, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new RootKeyException("无法读取工作密钥文件: " + path, e);
+    private static void validateName(String name) {
+        if (name == null || !RootKeyConstants.NAME_PATTERN.matcher(name).matches()) {
+            throw new RootKeyException("非法工作密钥名称: '" + name + "'（仅允许 1-64 位字母/数字/./_/-）");
         }
-        Map<String, String> map = new LinkedHashMap<String, String>();
-        for (String raw : lines) {
-            String line = raw.trim();
-            if (line.isEmpty() || line.startsWith("#")) {
-                continue;
-            }
-            int eq = line.indexOf('=');
-            if (eq <= 0) {
-                throw new RootKeyException("工作密钥文件格式错误: " + path + " -> \"" + line + "\"");
-            }
-            if (map.put(line.substring(0, eq).trim(), line.substring(eq + 1).trim()) != null) {
-                throw new RootKeyException("工作密钥文件存在重复字段 '" + line.substring(0, eq).trim() + "': " + path);
-            }
-        }
-        for (String required : new String[]{"version", "name", "rootKeyId", "rootKcv", "algorithm", "kcv", "wrapped", "checksum"}) {
-            if (!map.containsKey(required)) {
-                throw new RootKeyException("工作密钥文件缺少字段 '" + required + "': " + path);
-            }
-        }
-        int version;
-        try {
-            version = Integer.parseInt(map.get("version"));
-        } catch (NumberFormatException e) {
-            throw new RootKeyException("工作密钥文件 version 非法: " + path);
-        }
-        if (version != RootKeyConstants.FILE_FORMAT_VERSION) {
-            throw new RootKeyException("工作密钥文件版本不支持 (" + version + "): " + path);
-        }
-        if (!RootKeyConstants.ALGORITHM.equals(map.get("algorithm"))) {
-            throw new RootKeyException("工作密钥 algorithm 非法: '" + map.get("algorithm") + "': " + path);
-        }
-        WorkKeyFile wf = new WorkKeyFile(version, map.get("name"), map.get("rootKeyId"),
-                map.get("rootKcv"), map.get("kcv"),
-                decodeWrapped(map.get("wrapped"), path));
-        if (!wf.checksumHex().equalsIgnoreCase(map.get("checksum"))) {
-            throw new RootKeyException("工作密钥文件校验和不匹配（文件可能被篡改或损坏）: " + path
-                    + "，期望 " + wf.checksumHex() + "，实际 " + map.get("checksum").toLowerCase());
-        }
-        return wf;
     }
 
-    private static byte[] decodeWrapped(String b64, Path path) {
-        byte[] wrapped;
-        try {
-            wrapped = Base64.getDecoder().decode(b64 == null ? "" : b64);
-        } catch (IllegalArgumentException e) {
-            throw new RootKeyException("工作密钥 wrapped 不是合法 Base64: " + path);
+    /** 追加条目；同名条目已存在时抛错 */
+    public void add(Entry e) {
+        if (hasEntry(e.name())) {
+            throw new RootKeyException("文件中已存在同名工作密钥 '" + e.name() + "'");
         }
-        if (wrapped.length < 31) {
-            throw new RootKeyException("工作密钥 wrapped 长度非法: " + path);
-        }
-        return wrapped;
+        keys.add(e);
     }
 
-    /** 校验和覆盖的规范串 */
-    String canonical() {
-        return version + "|" + name + "|" + rootKeyId + "|" + rootKcvHex
-                + "|" + kcvHex + "|" + Codec.b64(wrapped);
+    /** 替换或追加条目 */
+    public void put(Entry e) {
+        for (int i = 0; i < keys.size(); i++) {
+            if (keys.get(i).name().equals(e.name())) {
+                keys.set(i, e);
+                return;
+            }
+        }
+        keys.add(e);
     }
 
-    public String checksumHex() {
-        return Codec.sha256Hex(canonical());
+    public boolean hasEntry(String name) {
+        return findEntry(name) != null;
     }
+
+    /** 按名称取条目；不存在时抛错并附上现有名称列表 */
+    public Entry getEntry(String name) {
+        Entry e = findEntry(name);
+        if (e == null) {
+            throw new RootKeyException("工作密钥文件中不存在 '" + name + "'，现有: " + names());
+        }
+        return e;
+    }
+
+    private Entry findEntry(String name) {
+        for (Entry e : keys) {
+            if (e.name().equals(name)) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    /** 文件内全部条目名称（按存放顺序） */
+    public List<String> names() {
+        List<String> out = new ArrayList<String>();
+        for (Entry e : keys) {
+            out.add(e.name());
+        }
+        return out;
+    }
+
+    public int keyCount() {
+        return keys.size();
+    }
+
+    // ------------------------------------------------------------------ 序列化
 
     public String serialize() {
-        StringBuilder sb = new StringBuilder(400);
+        Map<String, Object> root = new LinkedHashMap<String, Object>();
+        root.put("version", version);
+        root.put("rootKeyId", rootKeyId);
+        root.put("rootKcv", rootKcvHex);
+        List<Object> arr = new ArrayList<Object>();
+        for (Entry e : keys) {
+            arr.add(e.toJson());
+        }
+        root.put("keys", arr);
+        StringBuilder sb = new StringBuilder(512);
         sb.append("# RootKey 工作密钥文件（已被根密钥加密；泄露本文件不会泄露密钥，但请妥善保管）\n");
-        sb.append("# name=").append(name).append(" rootKeyId=").append(rootKeyId).append('\n');
-        sb.append("version=").append(version).append('\n');
-        sb.append("name=").append(name).append('\n');
-        sb.append("rootKeyId=").append(rootKeyId).append('\n');
-        sb.append("rootKcv=").append(rootKcvHex).append('\n');
-        sb.append("algorithm=").append(RootKeyConstants.ALGORITHM).append('\n');
-        sb.append("kcv=").append(kcvHex).append('\n');
-        sb.append("wrapped=").append(Codec.b64(wrapped)).append('\n');
-        sb.append("checksum=").append(checksumHex()).append('\n');
+        sb.append(Json.write(root)).append('\n');
         return sb.toString();
     }
 
@@ -176,12 +224,118 @@ public final class WorkKeyFile {
         }
     }
 
-    public int version() {
-        return version;
+    // ------------------------------------------------------------------ 加载
+
+    @SuppressWarnings("unchecked")
+    public static WorkKeyFile load(Path path) {
+        String text;
+        try {
+            text = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RootKeyException("无法读取工作密钥文件: " + path, e);
+        }
+        // 允许首行注释
+        String jsonText = stripCommentLines(text);
+        Object parsed;
+        try {
+            parsed = Json.parse(jsonText);
+        } catch (RuntimeException e) {
+            throw new RootKeyException("工作密钥文件不是合法 JSON: " + path + "（" + e.getMessage() + "）");
+        }
+        if (!(parsed instanceof Map)) {
+            throw new RootKeyException("工作密钥文件顶层必须是 JSON 对象: " + path);
+        }
+        Map<String, Object> root = (Map<String, Object>) parsed;
+        int version = intField(root, "version", path);
+        if (version != RootKeyConstants.FILE_FORMAT_VERSION) {
+            throw new RootKeyException("工作密钥文件版本不支持 (" + version + "): " + path);
+        }
+        String rootKeyId = strField(root, "rootKeyId", path);
+        String rootKcv = strField(root, "rootKcv", path);
+        validateRootFields(rootKeyId, rootKcv);
+
+        Object keysObj = root.get("keys");
+        if (!(keysObj instanceof List) || ((List<Object>) keysObj).isEmpty()) {
+            throw new RootKeyException("工作密钥文件 keys 必须是非空数组: " + path);
+        }
+        List<Entry> entries = new ArrayList<Entry>();
+        for (Object o : (List<Object>) keysObj) {
+            if (!(o instanceof Map)) {
+                throw new RootKeyException("工作密钥条目必须是 JSON 对象: " + path);
+            }
+            Map<String, Object> m = (Map<String, Object>) o;
+            String name = strField(m, "name", path);
+            validateName(name);
+            if (!RootKeyConstants.ALGORITHM.equals(strField(m, "algorithm", path))) {
+                throw new RootKeyException("工作密钥 '" + name + "' algorithm 非法（仅支持 AES）: " + path);
+            }
+            String kcv = strField(m, "kcv", path);
+            byte[] wrapped = decodeWrapped(strField(m, "wrapped", path), path, name);
+            String checksum = strField(m, "checksum", path);
+            // 从字段重算 checksum 再比对（不能拿文件里的存值自证）
+            String expected = Codec.sha256Hex("1|" + name + "|" + rootKeyId + "|" + rootKcv.toLowerCase()
+                    + "|" + kcv.toLowerCase() + "|" + Codec.b64(wrapped));
+            if (!expected.equalsIgnoreCase(checksum)) {
+                throw new RootKeyException("工作密钥 '" + name + "' 校验和不匹配（可能被篡改或损坏）: " + path
+                        + "，期望 " + expected + "，实际 " + checksum.toLowerCase());
+            }
+            entries.add(new Entry(name, rootKeyId, rootKcv, kcv, wrapped));
+        }
+        // 名称唯一性
+        for (int i = 0; i < entries.size(); i++) {
+            for (int j = i + 1; j < entries.size(); j++) {
+                if (entries.get(i).name().equals(entries.get(j).name())) {
+                    throw new RootKeyException("工作密钥文件存在重复名称 '" + entries.get(i).name() + "': " + path);
+                }
+            }
+        }
+        return new WorkKeyFile(version, rootKeyId, rootKcv, entries);
     }
 
-    public String name() {
-        return name;
+    private static String stripCommentLines(String text) {
+        // 跳过以 # 开头的行（JSON 本身不会以 # 开头）
+        StringBuilder sb = new StringBuilder(text.length());
+        for (String line : text.split("\n", -1)) {
+            String t = line.trim();
+            if (t.isEmpty() || t.startsWith("#")) {
+                continue;
+            }
+            sb.append(line).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static int intField(Map<String, Object> m, String key, Path path) {
+        Object v = m.get(key);
+        if (!(v instanceof Number)) {
+            throw new RootKeyException("工作密钥文件缺少数字字段 '" + key + "': " + path);
+        }
+        return ((Number) v).intValue();
+    }
+
+    private static String strField(Map<String, Object> m, String key, Path path) {
+        Object v = m.get(key);
+        if (!(v instanceof String) || ((String) v).trim().isEmpty()) {
+            throw new RootKeyException("工作密钥文件缺少字符串字段 '" + key + "': " + path);
+        }
+        return (String) v;
+    }
+
+    private static byte[] decodeWrapped(String b64, Path path, String name) {
+        byte[] wrapped;
+        try {
+            wrapped = Base64.getDecoder().decode(b64);
+        } catch (IllegalArgumentException e) {
+            throw new RootKeyException("工作密钥 '" + name + "' wrapped 不是合法 Base64: " + path);
+        }
+        if (wrapped.length < 31) {
+            throw new RootKeyException("工作密钥 '" + name + "' wrapped 长度非法: " + path);
+        }
+        return wrapped;
+    }
+
+    public int version() {
+        return version;
     }
 
     public String rootKeyId() {
@@ -192,12 +346,8 @@ public final class WorkKeyFile {
         return rootKcvHex;
     }
 
-    public String kcvHex() {
-        return kcvHex;
-    }
-
-    /** 被根密钥加密的密钥材料（返回副本） */
-    public byte[] wrapped() {
-        return wrapped.clone();
+    /** 文件内全部条目（只读视图语义：返回副本列表，Entry 不可变） */
+    public List<Entry> entries() {
+        return new ArrayList<Entry>(keys);
     }
 }
