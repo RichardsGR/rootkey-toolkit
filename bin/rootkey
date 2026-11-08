@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# rootkey 本地管理工具启动脚本
+# rootkey 本地管理工具启动脚本（可被符号链接，自动解析真实位置）
 set -e
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="${BASH_SOURCE[0]}"
+while [ -L "$SELF" ]; do
+  LINK="$(readlink "$SELF")"
+  case "$LINK" in
+    /*) SELF="$LINK" ;;
+    *) SELF="$(dirname "$SELF")/$LINK" ;;
+  esac
+done
+SELF_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 JAR="$SELF_DIR/../target/rootkey-toolkit.jar"
 if [ ! -f "$JAR" ]; then
   echo "未找到 $JAR，请先在项目根目录执行: mvn -q package" >&2
