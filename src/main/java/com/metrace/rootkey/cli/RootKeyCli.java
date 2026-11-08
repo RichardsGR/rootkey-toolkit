@@ -75,6 +75,16 @@ public final class RootKeyCli {
         if ("ui".equals(cmd)) {
             return cmdUi(rest);
         }
+        if ("client".equals(cmd)) {
+            // 打开桌面客户端窗口；挂住主线程，直到窗口关闭触发 EXIT_ON_CLOSE 整体退出
+            com.metrace.rootkey.client.RootKeyClient.main(rest);
+            try {
+                Thread.currentThread().join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return 0;
+        }
         if ("help".equals(cmd) || "--help".equals(cmd) || "-h".equals(cmd)) {
             printUsage(System.out);
             return 0;
@@ -385,6 +395,8 @@ public final class RootKeyCli {
         ps.println("  rootkey decrypt <同 encrypt>");
         ps.println("  rootkey ui [--port 8765]");
         ps.println("        启动本地 Web 管理台（仅监听 127.0.0.1）：生成/校验/还原/加解密");
+        ps.println("  rootkey client");
+        ps.println("        打开桌面客户端窗口（Swing 图形界面，内部直接调用 SDK）");
         ps.println();
         ps.println("选项:");
         ps.println("  --in      输入文件，\"-\" 或省略表示标准输入");

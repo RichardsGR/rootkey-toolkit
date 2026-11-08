@@ -49,7 +49,24 @@ echo -n '机密数据' | ./bin/rootkey encrypt ./secrets --base64 > msg.b64
 # 也支持二进制文件：./bin/rootkey encrypt ./secrets --in photo.jpg --out photo.jpg.enc
 ```
 
-### 4. Web 管理台（图形界面，可选）
+### 4. 桌面客户端（图形界面）
+
+```bash
+rootkey client          # 或双击 dist/RootKeyToolkit.app（见下）
+```
+
+Swing 实现的本地窗口应用（JDK 内置，零新增依赖），四个页签对应 生成 / 校验还原 / 加密 / 解密，
+内部直接调用 SDK（不走网络）。同样只显示 KCV，永不输出根密钥本体。
+
+**打成原生应用（macOS 示例，双击启动、自带精简 JRE，无需用户装 Java）：**
+
+```bash
+./bin/build-macos-app.sh     # 产物 dist/RootKeyToolkit.app（jpackage app-image）
+```
+
+Linux/Windows 同理：改 `jpackage --type` 为 `deb`/`rpm`/`msi` 即可。打包产物不入库（`dist/` 已忽略）。
+
+### 5. Web 管理台（浏览器界面，可选）
 
 不想敲命令行？一条命令启动本地 Web 管理台：
 
@@ -178,6 +195,7 @@ rootkey-toolkit/
     │   ├── crypto/                 # AesGcmCipher（AES-256-GCM）
     │   ├── config/                 # RootKeyConfig（abcd 配置项 + 环境变量覆盖）
     │   ├── webui/                  # WebUiServer + Json（本地 Web 管理台，纯 JDK HttpServer）
+    │   ├── client/                 # RootKeyClient + MainWindow（Swing 桌面客户端，直调 SDK）
     │   └── cli/                    # RootKeyCli（命令行入口，含 ui 子命令）
     ├── main/resources/web/index.html  # 管理台页面（打进 jar，随 ui 命令内置发布）
     └── test/java/...               # 17 个测试：往返/确定性/防篡改/混用/配置覆盖/Web API/CSRF 防护
