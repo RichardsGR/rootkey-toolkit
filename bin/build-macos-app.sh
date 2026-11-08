@@ -10,6 +10,10 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 cp target/rootkey-toolkit.jar "$STAGE/"
 
+# jpackage 不覆盖已存在的产物，先清掉旧包
+rm -rf "dist/RootKeyToolkit.app"
+mkdir -p dist
+
 jpackage \
   --type app-image \
   --name RootKeyToolkit \
