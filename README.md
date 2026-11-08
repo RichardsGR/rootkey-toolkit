@@ -49,7 +49,19 @@ echo -n '机密数据' | ./bin/rootkey encrypt ./secrets --base64 > msg.b64
 # 也支持二进制文件：./bin/rootkey encrypt ./secrets --in photo.jpg --out photo.jpg.enc
 ```
 
-### 4. 分发到服务器
+### 4. Web 管理台（图形界面，可选）
+
+不想敲命令行？一条命令启动本地 Web 管理台：
+
+```bash
+./bin/rootkey ui --port 8765     # 默认 8765
+```
+
+浏览器打开 `http://127.0.0.1:8765`，即可完成 生成 / 校验还原 / 加密 / 解密 全部操作。
+安全边界：**仅监听 127.0.0.1**（外部主机不可访问）；API 强制 `application/json`（防跨站伪造）；
+页面只显示 KCV 指纹，**根密钥本体与组件材料任何界面都不会输出**。
+
+### 5. 分发到服务器
 
 将 `a/b/c/d.comp` 四个文件**分别**通过安全渠道放到服务器的不同位置（建议不同目录、不同权限，甚至不同挂载点/密管系统），例如：
 
@@ -165,6 +177,8 @@ rootkey-toolkit/
     │   ├── core/                   # ComponentFile / Generator / Restorer / RootKeySecret
     │   ├── crypto/                 # AesGcmCipher（AES-256-GCM）
     │   ├── config/                 # RootKeyConfig（abcd 配置项 + 环境变量覆盖）
-    │   └── cli/                    # RootKeyCli（本地管理工具）
-    └── test/java/...               # 13 个测试：往返/确定性/防篡改/混用/配置覆盖
+    │   ├── webui/                  # WebUiServer + Json（本地 Web 管理台，纯 JDK HttpServer）
+    │   └── cli/                    # RootKeyCli（命令行入口，含 ui 子命令）
+    ├── main/resources/web/index.html  # 管理台页面（打进 jar，随 ui 命令内置发布）
+    └── test/java/...               # 17 个测试：往返/确定性/防篡改/混用/配置覆盖/Web API/CSRF 防护
 ```

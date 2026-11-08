@@ -72,6 +72,9 @@ public final class RootKeyCli {
         if ("encrypt".equals(cmd) || "decrypt".equals(cmd)) {
             return cmdEncryptDecrypt(cmd, rest);
         }
+        if ("ui".equals(cmd)) {
+            return cmdUi(rest);
+        }
         if ("help".equals(cmd) || "--help".equals(cmd) || "-h".equals(cmd)) {
             printUsage(System.out);
             return 0;
@@ -231,6 +234,43 @@ public final class RootKeyCli {
         }
     }
 
+    // ------------------------------------------------------------------ ui
+
+    /** 启动本地 Web 管理页面（仅监听 127.0.0.1） */
+    private static int cmdUi(String[] args) throws IOException {
+        int port = 8765;
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
+            if ("--port".equals(a)) {
+                String v = requireValue(args, ++i, a);
+                try {
+                    port = Integer.parseInt(v);
+                } catch (NumberFormatException e) {
+                    throw new UsageException("--port 需要数字，收到: " + v);
+                }
+            } else {
+                throw new UsageException("ui 不认识参数: " + a);
+            }
+        }
+        com.metrace.rootkey.webui.WebUiServer server;
+        try {
+            server = new com.metrace.rootkey.webui.WebUiServer(port);
+        } catch (IOException e) {
+            throw new RootKeyException("无法在 127.0.0.1:" + port + " 启动管理页面（端口被占用？可用 --port 换一个）", e);
+        }
+        server.start();
+        System.out.println("RootKey 管理台已启动: http://127.0.0.1:" + server.port());
+        System.out.println("仅监听 127.0.0.1（本机可访问）；Ctrl-C 退出。");
+        // WebUiServer 线程均为守护线程，主线程挂住保活
+        try {
+            Thread.currentThread().join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        server.stop();
+        return 0;
+    }
+
     // ------------------------------------------------------------------ helpers
 
     /** 从配置文件取四个组件路径 */
@@ -343,6 +383,8 @@ public final class RootKeyCli {
         ps.println("  rootkey encrypt <组件目录 | a b c d 四个文件> [--config <配置文件>]");
         ps.println("                   [--in <文件|->] [--out <文件|->] [--base64]");
         ps.println("  rootkey decrypt <同 encrypt>");
+        ps.println("  rootkey ui [--port 8765]");
+        ps.println("        启动本地 Web 管理台（仅监听 127.0.0.1）：生成/校验/还原/加解密");
         ps.println();
         ps.println("选项:");
         ps.println("  --in      输入文件，\"-\" 或省略表示标准输入");

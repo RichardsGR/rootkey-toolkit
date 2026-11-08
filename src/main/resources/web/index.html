@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RootKey 管理台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f4f6f9; color: #1e293b; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; padding: 32px 16px;
+  }
+  header { text-align: center; margin-bottom: 24px; }
+  header h1 { font-size: 24px; letter-spacing: 1px; }
+  header .sub { color: #64748b; font-size: 13px; margin-top: 6px; }
+  header .sub b { color: #2563eb; }
+  .wrap { width: 100%; max-width: 720px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tabs button {
+    padding: 10px 18px; border: 1px solid #d7dde6; background: #fff; color: #475569;
+    border-radius: 8px; font-size: 14px; cursor: pointer; transition: all .15s;
+  }
+  .tabs button.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+  .card {
+    background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+    padding: 24px; box-shadow: 0 1px 3px rgba(15,23,42,.05);
+  }
+  .card h2 { font-size: 16px; margin-bottom: 4px; }
+  .card .desc { color: #64748b; font-size: 13px; margin-bottom: 18px; }
+  label { display: block; font-size: 13px; color: #475569; margin: 14px 0 6px; }
+  input[type=text], textarea {
+    width: 100%; border: 1px solid #cbd5e1; border-radius: 8px; padding: 9px 12px;
+    font-size: 14px; font-family: inherit; outline: none; background: #fff;
+  }
+  input[type=text]:focus, textarea:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+  textarea { resize: vertical; min-height: 88px; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .row { display: flex; gap: 12px; align-items: center; }
+  .row label { margin: 14px 0 0; }
+  .checkline { display: flex; align-items: center; gap: 6px; margin-top: 14px; font-size: 13px; color: #475569; }
+  .btn {
+    margin-top: 18px; width: 100%; padding: 11px; border: none; border-radius: 8px;
+    background: #2563eb; color: #fff; font-size: 15px; cursor: pointer;
+  }
+  .btn:hover { background: #1d4ed8; }
+  .btn:disabled { background: #94a3b8; cursor: wait; }
+  .result { margin-top: 18px; }
+  .result .block { margin-bottom: 14px; }
+  .result .block .k { font-size: 12px; color: #64748b; margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .result .block .k .copy { cursor: pointer; color: #2563eb; user-select: none; }
+  .result .v {
+    background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 10px 12px;
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;
+    word-break: break-all; white-space: pre-wrap;
+  }
+  .result .v.ok { color: #86efac; }
+  .result .v.err { color: #fca5a5; }
+  table.files { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.files th, table.files td { text-align: left; padding: 7px 8px; border-bottom: 1px solid #eef2f7; }
+  table.files td.path { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; word-break: break-all; }
+  .pill { padding: 1px 9px; border-radius: 99px; font-size: 12px; }
+  .pill.ok { background: #dcfce7; color: #15803d; }
+  .pill.err { background: #fee2e2; color: #b91c1c; }
+  .kcv-badge {
+    display: inline-block; background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
+    border-radius: 8px; padding: 8px 14px; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 14px; letter-spacing: 1px;
+  }
+  footer { margin-top: 26px; color: #94a3b8; font-size: 12px; text-align: center; line-height: 1.7; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔐 RootKey 管理台</h1>
+  <div class="sub">4-of-4 分片 / AES-256-GCM · 仅监听 <b>127.0.0.1</b> · 根密钥永不显示，只显示 KCV 指纹</div>
+</header>
+
+<div class="wrap">
+  <div class="tabs">
+    <button data-tab="gen" class="active">① 生成组件</button>
+    <button data-tab="verify">② 校验与还原</button>
+    <button data-tab="enc">③ 加密</button>
+    <button data-tab="dec">④ 解密</button>
+  </div>
+
+  <!-- 生成 -->
+  <div class="card" id="tab-gen">
+    <h2>生成根密钥四组件</h2>
+    <div class="desc">本地生成 a/b/c/d 四份材料（密钥本体不落盘），生成后分发给服务器。</div>
+    <label>keyId（留空自动生成 rk-时间戳）</label>
+    <input type="text" id="gen-keyid" placeholder="如 order-service-001">
+    <label>输出目录</label>
+    <input type="text" id="gen-out" placeholder="如 /Users/you/secrets 或 ./secrets">
+    <div class="checkline">
+      <input type="checkbox" id="gen-force"> <span>目标目录已有文件时覆盖（--force）</span>
+    </div>
+    <button class="btn" id="gen-btn" onclick="doGenerate()">生 成</button>
+    <div class="result" id="gen-result"></div>
+  </div>
+
+  <!-- 校验 -->
+  <div class="card" id="tab-verify" style="display:none">
+    <h2>校验与试还原</h2>
+    <div class="desc">逐文件校验 checksum、标签一致性，并试还原显示 KCV。可用于核对服务器组件分发是否正确。</div>
+    <label>组件目录（内含 a.comp ~ d.comp），或四个文件路径</label>
+    <input type="text" id="v-dir" placeholder="如 ./secrets">
+    <label>（可选）四个文件路径，逗号分隔，优先于目录</label>
+    <input type="text" id="v-files" placeholder="/p/a.comp, /p/b.comp, /p/c.comp, /p/d.comp">
+    <button class="btn" id="v-btn" onclick="doVerify()">校 验</button>
+    <div class="result" id="v-result"></div>
+  </div>
+
+  <!-- 加密 -->
+  <div class="card" id="tab-enc" style="display:none">
+    <h2>加密（AES-256-GCM）</h2>
+    <div class="desc">用四组件还原密钥并加密，输出 Base64 密文。</div>
+    <label>组件目录</label>
+    <input type="text" id="e-dir" placeholder="如 ./secrets">
+    <label>明文</label>
+    <textarea id="e-plain" placeholder="要加密的内容"></textarea>
+    <button class="btn" id="e-btn" onclick="doEncrypt()">加 密</button>
+    <div class="result" id="e-result"></div>
+  </div>
+
+  <!-- 解密 -->
+  <div class="card" id="tab-dec" style="display:none">
+    <h2>解密（AES-256-GCM）</h2>
+    <div class="desc">用四组件还原密钥并解密 Base64 密文。</div>
+    <label>组件目录</label>
+    <input type="text" id="d-dir" placeholder="如 ./secrets">
+    <label>密文（Base64）</label>
+    <textarea id="d-cipher" placeholder="粘贴 encrypt 输出的 Base64 密文"></textarea>
+    <button class="btn" id="d-btn" onclick="doDecrypt()">解 密</button>
+    <div class="result" id="d-result"></div>
+  </div>
+</div>
+
+<footer>
+  安全提示：单份组件泄露不构成风险，<b>四份同时泄露即等于根密钥泄露</b>，请分开存放并各自备份；
+  丢任何一份，根密钥将永久无法还原。
+</footer>
+
+<script>
+// 页面加载时记住组件目录（四个标签页共用习惯目录）
+const dirInputs = ['v-dir', 'e-dir', 'd-dir'];
+dirInputs.forEach(id => document.getElementById(id).addEventListener('change', e => {
+  dirInputs.forEach(o => { if (o !== id) document.getElementById(o).value = e.target.value; });
+}));
+
+// 标签页切换
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  ['gen', 'verify', 'enc', 'dec'].forEach(t =>
+    document.getElementById('tab-' + t).style.display = b.dataset.tab === t ? '' : 'none');
+});
+
+async function api(path, body) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function busy(id, on, text) {
+  const b = document.getElementById(id);
+  b.disabled = on;
+  if (text) b.textContent = text;
+}
+
+function block(k, v, cls, copyable) {
+  const copy = copyable ? '<span class="copy" onclick="copyText(this)">复制</span>' : '';
+  return `<div class="block"><div class="k"><span>${k}</span>${copy}</div>` +
+         `<div class="v ${cls || ''}">${esc(v)}</div></div>`;
+}
+
+function copyText(el) {
+  const v = el.closest('.block').querySelector('.v').textContent;
+  navigator.clipboard.writeText(v).then(() => { el.textContent = '已复制 ✓';
+    setTimeout(() => el.textContent = '复制', 1200); });
+}
+
+function kcvBlock(keyId, kcv) {
+  return `<div class="block"><div class="k"><span>keyId / KCV 指纹（与生成端核对）</span></div>` +
+         `<div class="v ok">${esc(keyId)} · ${esc(kcv)}</div></div>`;
+}
+
+async function doGenerate() {
+  busy('gen-btn', true, '生成中…');
+  document.getElementById('gen-result').innerHTML = '';
+  try {
+    const r = await api('/api/generate', {
+      outDir: document.getElementById('gen-out').value,
+      keyId: document.getElementById('gen-keyid').value,
+      force: document.getElementById('gen-force').checked
+    });
+    let html = '';
+    if (r.ok) {
+      html += kcvBlock(r.keyId, r.kcv);
+      html += `<table class="files"><tr><th>组件</th><th>路径</th><th>大小</th></tr>` +
+        r.components.map(c =>
+          `<tr><td><span class="pill ok">${esc(c.label)}</span></td>` +
+          `<td class="path">${esc(c.path)}</td><td>${c.bytes} B</td></tr>`).join('') +
+        `</table>`;
+      html += block('manifest', r.manifest, '', true);
+    } else {
+      html = block('错误', r.error || '未知错误', 'err');
+    }
+    document.getElementById('gen-result').innerHTML = html;
+  } catch (e) {
+    document.getElementById('gen-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('gen-btn', false, '生 成');
+  }
+}
+
+async function doVerify() {
+  busy('v-btn', true, '校验中…');
+  document.getElementById('v-result').innerHTML = '';
+  try {
+    const body = { dir: document.getElementById('v-dir').value };
+    const four = document.getElementById('v-files').value.split(',').map(s => s.trim()).filter(Boolean);
+    if (four.length === 4) { body.a = four[0]; body.b = four[1]; body.c = four[2]; body.d = four[3]; }
+    const r = await api('/api/verify', body);
+    let html = '';
+    if (r.files) {
+      html += `<table class="files"><tr><th>组件</th><th>路径</th><th>状态</th></tr>` +
+        r.files.map(f =>
+          `<tr><td><span class="pill ${f.ok ? 'ok' : 'err'}">${esc(f.label || '?')}</span></td>` +
+          `<td class="path">${esc(f.path || '')}</td>` +
+          `<td>${f.ok ? '<span class="pill ok">OK</span>' : '<span class="pill err">失败</span>'}</td></tr>` +
+          (f.error ? `<tr><td colspan="3" class="path" style="color:#b91c1c">${esc(f.error)}</td></tr>` : '')
+        ).join('') + `</table>`;
+    }
+    html += r.ok ? kcvBlock(r.keyId, r.kcv) : block('校验未通过', r.error || '见上方明细', 'err');
+    document.getElementById('v-result').innerHTML = html;
+  } catch (e) {
+    document.getElementById('v-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('v-btn', false, '校 验');
+  }
+}
+
+async function doEncrypt() {
+  busy('e-btn', true, '加密中…');
+  document.getElementById('e-result').innerHTML = '';
+  try {
+    const r = await api('/api/encrypt', {
+      dir: document.getElementById('e-dir').value,
+      plaintext: document.getElementById('e-plain').value
+    });
+    let html = r.ok
+      ? kcvBlock(r.keyId, r.kcv) + block('密文（Base64）', r.ciphertextB64, '', true)
+      : block('错误', r.error || '未知错误', 'err');
+    document.getElementById('e-result').innerHTML = html;
+  } catch (e) {
+    document.getElementById('e-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('e-btn', false, '加 密');
+  }
+}
+
+async function doDecrypt() {
+  busy('d-btn', true, '解密中…');
+  document.getElementById('d-result').innerHTML = '';
+  try {
+    const r = await api('/api/decrypt', {
+      dir: document.getElementById('d-dir').value,
+      ciphertextB64: document.getElementById('d-cipher').value
+    });
+    let html = r.ok
+      ? kcvBlock(r.keyId, r.kcv) + block('明文', r.plaintext, 'ok', true)
+      : block('错误', r.error || '未知错误', 'err');
+    document.getElementById('d-result').innerHTML = html;
+  } catch (e) {
+    document.getElementById('d-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('d-btn', false, '解 密');
+  }
+}
+</script>
+</body>
+</html>
