@@ -1,6 +1,7 @@
 target/
 dist/
 *.comp
+*.workkey
 manifest.properties
 rootkey-components/
 secrets/

@@ -31,8 +31,8 @@ import java.util.regex.Pattern;
  */
 public final class ComponentFile {
 
-    /** keyId 仅允许安全字符，保证 canonical 串无歧义 */
-    static final Pattern KEY_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
+    /** keyId 仅允许安全字符，保证 canonical 串无歧义（规则统一收敛在常量类） */
+    static final Pattern KEY_ID_PATTERN = RootKeyConstants.NAME_PATTERN;
 
     private static final Pattern HEX_16 = Pattern.compile("^[0-9a-fA-F]{16}$");
     private static final Pattern HEX_64 = Pattern.compile("^[0-9a-fA-F]{64}$");

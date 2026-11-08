@@ -26,6 +26,13 @@ public final class RootKeyConstants {
     /** 算法标识 */
     public static final String ALGORITHM = "AES";
 
+    /** keyId / 工作密钥名称等标识符的统一命名规则 */
+    public static final java.util.regex.Pattern NAME_PATTERN =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
+
+    /** 工作密钥文件的默认扩展名 */
+    public static final String WORKKEY_FILE_SUFFIX = ".workkey";
+
     private RootKeyConstants() {
     }
 }

@@ -141,7 +141,50 @@ public RootKeyManager rootKeyManager() throws Exception {
 }
 ```
 
-## 四、设计说明
+## 四、工作密钥（信封加密）
+
+业务数据**不该**直接用根密钥加密。标准做法是信封加密：根密钥只管加密"工作密钥"，工作密钥（WorkKey）负责加密业务数据——根密钥几乎不动用，密钥轮换、按业务隔离都在 WorkKey 层完成。
+
+```
+生成（管理侧）                          业务侧使用
+─────────────                          ─────────────
+SecureRandom → WorkKey(32B)            RootKey组件(4份) ─┐
+     │  立即用 RootKey 加密                               ├→ 还原 WorkKey 到内存
+     ▼                                                   │   ↓ AES-256-GCM
+order-db.workkey 文件 ──── 可安全分发到业务侧 ────────────┘   加解密业务数据
+```
+
+### CLI
+
+```bash
+# 生成工作密钥（指定名称），立即用根密钥加密落盘
+rootkey workkey gen --name order-db --out order-db.workkey ./secrets
+
+# 还原自校验（只显示 KCV）
+rootkey workkey restore --workkey order-db.workkey ./secrets
+
+# 用工作密钥加解密（AES-256-GCM）
+echo -n '数据' | rootkey workkey encrypt --workkey order-db.workkey ./secrets --base64
+rootkey workkey decrypt --workkey order-db.workkey ./secrets --in ct.b64 --base64
+```
+
+### SDK API
+
+```java
+// 业务侧：根据根密钥配置 + WorkKey 文件路径，直接还原到内存使用
+try (RootKeyManager root = RootKeyManager.fromConfigFile(Paths.get("/etc/app/rootkey.properties"));
+     WorkKeyManager wk = new WorkKeyManager(root, Paths.get("/data/keys/order-db.workkey"))) {
+    String ct = wk.encryptToBase64("订单敏感字段");   // AES-256-GCM
+    String pt = wk.decryptFromBase64(ct);
+}
+```
+
+`WorkKeyManager` 惰性还原并缓存（线程安全），`close()` 销毁内存密钥。还原时依次校验：
+文件 checksum → 根密钥归属（rootKeyId/rootKcv，拿错根密钥会给出明确报错而非晦涩的 GCM 错误）→ GCM 认证标签 → WorkKey KCV 自证。
+
+`.workkey` 文件只含被根密钥加密后的密钥材料，**泄露它不直接泄露密钥**（没有四组件还原不出 WorkKey），但仍请妥善保管；文件权限默认 600。
+
+## 五、设计说明
 
 ### 分片方案（4-of-4 XOR）
 
@@ -173,7 +216,7 @@ public RootKeyManager rootKeyManager() throws Exception {
 | 混入其他根密钥的组件 | 报 `KCV 校验失败` |
 | 用错误密钥解密/密文被改 | GCM 认证失败，报 `解密失败：密文被篡改或密钥不匹配` |
 
-## 五、安全与运维建议
+## 六、安全与运维建议
 
 1. **四组件分开存放**：不同目录 + 最小权限（文件已尽力设为 `600`）。更严格时可分别存入不同密管/配置中心，只要四个配置项能指到即可。
 2. **传输安全**：组件可分批、分人传输；四者**同时**到达同一位置前不构成风险。
@@ -181,7 +224,7 @@ public RootKeyManager rootKeyManager() throws Exception {
 4. **轮换**：重新 `generate` 一批组件（新 keyId/KCV），旧数据需先解密再用新密钥加密。
 5. **绝不**把组件提交到代码仓库（`.gitignore` 已包含 `*.comp`）；KCV 可以记日志，密钥本体与组件材料不可。
 
-## 六、项目结构
+## 七、项目结构
 
 ```
 rootkey-toolkit/
@@ -194,9 +237,10 @@ rootkey-toolkit/
     │   ├── core/                   # ComponentFile / Generator / Restorer / RootKeySecret
     │   ├── crypto/                 # AesGcmCipher（AES-256-GCM）
     │   ├── config/                 # RootKeyConfig（abcd 配置项 + 环境变量覆盖）
+    │   ├── workkey/                # WorkKeyManager/WorkKeyFile/WorkKeySecret（信封加密）
     │   ├── webui/                  # WebUiServer + Json（本地 Web 管理台，纯 JDK HttpServer）
     │   ├── client/                 # RootKeyClient + MainWindow（Swing 桌面客户端，直调 SDK）
     │   └── cli/                    # RootKeyCli（命令行入口，含 ui 子命令）
     ├── main/resources/web/index.html  # 管理台页面（打进 jar，随 ui 命令内置发布）
-    └── test/java/...               # 17 个测试：往返/确定性/防篡改/混用/配置覆盖/Web API/CSRF 防护
+    └── test/java/...               # 24 个测试：往返/确定性/防篡改/混用/配置覆盖/Web API/CSRF/工作密钥
 ```
