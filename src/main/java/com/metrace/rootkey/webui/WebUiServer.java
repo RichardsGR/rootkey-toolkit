@@ -60,6 +60,10 @@ public final class WebUiServer {
         server.createContext("/api/verify", guarded(this::handleVerify));
         server.createContext("/api/encrypt", guarded(this::handleEncryptDecrypt));
         server.createContext("/api/decrypt", guarded(this::handleEncryptDecrypt));
+        server.createContext("/api/workkey/generate", guarded(this::handleWkGenerate));
+        server.createContext("/api/workkey/restore", guarded(this::handleWkRestore));
+        server.createContext("/api/workkey/encrypt", guarded(this::handleWkCrypt));
+        server.createContext("/api/workkey/decrypt", guarded(this::handleWkCrypt));
         server.setExecutor(newDaemonPool());
     }
 
@@ -192,6 +196,82 @@ public final class WebUiServer {
                         + "\",\"plaintext\":\"" + Json.escape(km.decryptFromBase64(ciphertextB64)) + "\"}");
             }
         }
+    }
+
+    // ------------------------------------------------------------------ workkey API
+
+    /** POST /api/workkey/generate {dir|a-d, name, outFile?, force?} */
+    private void handleWkGenerate(HttpExchange ex, Map<String, String> p) throws IOException {
+        String name = p.get("name");
+        if (name == null || name.trim().isEmpty()) {
+            throw new RootKeyException("缺少参数 name（工作密钥名称）");
+        }
+        RootKeyConfig cfg = configFrom(p);
+        String out = p.get("outFile");
+        Path outFile;
+        if (out == null || out.trim().isEmpty()) {
+            // Web 场景不指定输出文件时，默认落到组件目录（避免相对 CWD 造成文件位置不明）
+            outFile = cfg.aPath().toAbsolutePath().getParent()
+                    .resolve(name.trim() + RootKeyConstants.WORKKEY_FILE_SUFFIX);
+        } else {
+            outFile = Paths.get(out.trim());
+        }
+        boolean force = "true".equals(p.get("force"));
+        try (RootKeyManager root = new RootKeyManager(cfg);
+             com.metrace.rootkey.workkey.WorkKeyManager.Generated g =
+                     com.metrace.rootkey.workkey.WorkKeyManager.generate(outFile, name.trim(), root, force)) {
+            sendJson(ex, 200, "{\"ok\":true,\"name\":\"" + Json.escape(g.name())
+                    + "\",\"kcv\":\"" + g.kcvHex()
+                    + "\",\"file\":\"" + Json.escape(g.file().toString())
+                    + "\",\"rootKeyId\":\"" + Json.escape(root.keyId())
+                    + "\",\"rootKcv\":\"" + root.kcv() + "\"}");
+        }
+    }
+
+    /** POST /api/workkey/restore {dir|a-d, workkey} */
+    private void handleWkRestore(HttpExchange ex, Map<String, String> p) throws IOException {
+        RootKeyConfig cfg = configFrom(p);
+        String wk = requireParam(p, "workkey");
+        try (RootKeyManager root = new RootKeyManager(cfg);
+             com.metrace.rootkey.workkey.WorkKeySecret s =
+                     com.metrace.rootkey.workkey.WorkKeyManager.restore(Paths.get(wk), root)) {
+            sendJson(ex, 200, "{\"ok\":true,\"name\":\"" + Json.escape(s.name())
+                    + "\",\"kcv\":\"" + s.kcvHex()
+                    + "\",\"rootKeyId\":\"" + Json.escape(root.keyId()) + "\"}");
+        }
+    }
+
+    /** POST /api/workkey/encrypt {dir|a-d, workkey, plaintext} / decrypt {..., ciphertextB64} */
+    private void handleWkCrypt(HttpExchange ex, Map<String, String> p) throws IOException {
+        boolean isEncrypt = ex.getRequestURI().getPath().endsWith("/encrypt");
+        RootKeyConfig cfg = configFrom(p);
+        String wk = requireParam(p, "workkey");
+        try (RootKeyManager root = new RootKeyManager(cfg);
+             com.metrace.rootkey.workkey.WorkKeyManager wkm =
+                     new com.metrace.rootkey.workkey.WorkKeyManager(root, Paths.get(wk))) {
+            if (isEncrypt) {
+                String plaintext = p.get("plaintext");
+                if (plaintext == null) {
+                    throw new RootKeyException("缺少参数 plaintext");
+                }
+                sendJson(ex, 200, "{\"ok\":true,\"name\":\"" + Json.escape(wkm.name())
+                        + "\",\"kcv\":\"" + wkm.kcv()
+                        + "\",\"ciphertextB64\":\"" + wkm.encryptToBase64(plaintext) + "\"}");
+            } else {
+                String ciphertextB64 = requireParam(p, "ciphertextB64");
+                sendJson(ex, 200, "{\"ok\":true,\"name\":\"" + Json.escape(wkm.name())
+                        + "\",\"kcv\":\"" + wkm.kcv()
+                        + "\",\"plaintext\":\"" + Json.escape(wkm.decryptFromBase64(ciphertextB64)) + "\"}");
+            }
+        }
+    }
+
+    private static String requireParam(Map<String, String> p, String key) {
+        String v = p.get(key);
+        if (v == null || v.trim().isEmpty()) {
+            throw new RootKeyException("缺少参数 " + key);
+        }
+        return v.trim();
     }
 
     // ------------------------------------------------------------------ helpers

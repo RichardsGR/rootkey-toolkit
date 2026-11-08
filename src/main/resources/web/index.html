@@ -81,6 +81,8 @@
     <button data-tab="verify">② 校验与还原</button>
     <button data-tab="enc">③ 加密</button>
     <button data-tab="dec">④ 解密</button>
+    <button data-tab="wkgen">⑤ 生成工作密钥</button>
+    <button data-tab="wkcrypt">⑥ 工作密钥·加解密</button>
   </div>
 
   <!-- 生成 -->
@@ -133,6 +135,41 @@
     <button class="btn" id="d-btn" onclick="doDecrypt()">解 密</button>
     <div class="result" id="d-result"></div>
   </div>
+<!-- 生成工作密钥 -->
+  <div class="card" id="tab-wkgen" style="display:none">
+    <h2>生成工作密钥（信封加密）</h2>
+    <div class="desc">随机生成 AES-256 工作密钥，立即用根密钥加密落盘；.workkey 文件可安全分发到业务侧。</div>
+    <label>根密钥组件目录</label>
+    <input type="text" id="wg-root" placeholder="如 ./secrets">
+    <label>工作密钥名称（必填）</label>
+    <input type="text" id="wg-name" placeholder="如 order-db">
+    <label>输出文件（可选，默认 &lt;名称&gt;.workkey）</label>
+    <input type="text" id="wg-out" placeholder="如 ./keys/order-db.workkey">
+    <div class="checkline">
+      <input type="checkbox" id="wg-force"> <span>目标文件已存在时覆盖</span>
+    </div>
+    <button class="btn" id="wg-btn" onclick="wkGenerate()">生 成</button>
+    <div class="result" id="wg-result"></div>
+  </div>
+
+  <!-- 工作密钥加解密 -->
+  <div class="card" id="tab-wkcrypt" style="display:none">
+    <h2>工作密钥加解密（AES-256-GCM）</h2>
+    <div class="desc">用根密钥还原 .workkey 到内存后加解密业务数据；结果会显示工作密钥名称与 KCV。</div>
+    <label>根密钥组件目录</label>
+    <input type="text" id="wc-root" placeholder="如 ./secrets">
+    <label>工作密钥文件（.workkey）</label>
+    <input type="text" id="wc-file" placeholder="如 ./keys/order-db.workkey">
+    <button class="btn" id="wc-verify-btn" onclick="wkVerify()">还 原 校 验</button>
+    <label>明文</label>
+    <textarea id="wc-plain" placeholder="要加密的内容"></textarea>
+    <button class="btn" id="wc-enc-btn" onclick="wkEncrypt()">加 密</button>
+    <div class="result" id="wc-enc-result"></div>
+    <label>密文（Base64）</label>
+    <textarea id="wc-cipher" placeholder="粘贴工作密钥加密输出的 Base64 密文"></textarea>
+    <button class="btn" id="wc-dec-btn" onclick="wkDecrypt()">解 密</button>
+    <div class="result" id="wc-dec-result"></div>
+  </div>
 </div>
 
 <footer>
@@ -141,8 +178,8 @@
 </footer>
 
 <script>
-// 页面加载时记住组件目录（四个标签页共用习惯目录）
-const dirInputs = ['v-dir', 'e-dir', 'd-dir'];
+// 页面加载时记住组件目录（各标签页共用习惯目录）
+const dirInputs = ['v-dir', 'e-dir', 'd-dir', 'wg-root', 'wc-root'];
 dirInputs.forEach(id => document.getElementById(id).addEventListener('change', e => {
   dirInputs.forEach(o => { if (o !== id) document.getElementById(o).value = e.target.value; });
 }));
@@ -151,7 +188,7 @@ dirInputs.forEach(id => document.getElementById(id).addEventListener('change', e
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
-  ['gen', 'verify', 'enc', 'dec'].forEach(t =>
+  ['gen', 'verify', 'enc', 'dec', 'wkgen', 'wkcrypt'].forEach(t =>
     document.getElementById('tab-' + t).style.display = b.dataset.tab === t ? '' : 'none');
 });
 
@@ -282,6 +319,92 @@ async function doDecrypt() {
     document.getElementById('d-result').innerHTML = block('请求失败', e, 'err');
   } finally {
     busy('d-btn', false, '解 密');
+  }
+}
+
+// ---------- 工作密钥（信封加密） ----------
+
+async function wkGenerate() {
+  busy('wg-btn', true, '生成中…');
+  document.getElementById('wg-result').innerHTML = '';
+  try {
+    const r = await api('/api/workkey/generate', {
+      dir: document.getElementById('wg-root').value,
+      name: document.getElementById('wg-name').value,
+      outFile: document.getElementById('wg-out').value,
+      force: document.getElementById('wg-force').checked
+    });
+    let html = '';
+    if (r.ok) {
+      html += kcvBlock(r.name, r.kcv);
+      html += block('文件（可分发业务侧）', r.file, '', true);
+      html += block('加密它的根密钥', r.rootKeyId + ' · ' + r.rootKcv, '');
+    } else {
+      html = block('错误', r.error || '未知错误', 'err');
+    }
+    document.getElementById('wg-result').innerHTML = html;
+  } catch (e) {
+    document.getElementById('wg-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('wg-btn', false, '生 成');
+  }
+}
+
+async function wkVerify() {
+  busy('wc-verify-btn', true, '校验中…');
+  document.getElementById('wc-dec-result').innerHTML = '';
+  try {
+    const r = await api('/api/workkey/restore', {
+      dir: document.getElementById('wc-root').value,
+      workkey: document.getElementById('wc-file').value
+    });
+    document.getElementById('wc-dec-result').innerHTML = r.ok
+      ? kcvBlock(r.name, r.kcv)
+      : block('还原失败', r.error || '未知错误', 'err');
+  } catch (e) {
+    document.getElementById('wc-dec-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('wc-verify-btn', false, '还 原 校 验');
+  }
+}
+
+async function wkEncrypt() {
+  busy('wc-enc-btn', true, '加密中…');
+  document.getElementById('wc-enc-result').innerHTML = '';
+  try {
+    const r = await api('/api/workkey/encrypt', {
+      dir: document.getElementById('wc-root').value,
+      workkey: document.getElementById('wc-file').value,
+      plaintext: document.getElementById('wc-plain').value
+    });
+    let html = r.ok
+      ? kcvBlock(r.name, r.kcv) + block('密文（Base64）', r.ciphertextB64, '', true)
+      : block('错误', r.error || '未知错误', 'err');
+    document.getElementById('wc-enc-result').innerHTML = html;
+  } catch (e) {
+    document.getElementById('wc-enc-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('wc-enc-btn', false, '加 密');
+  }
+}
+
+async function wkDecrypt() {
+  busy('wc-dec-btn', true, '解密中…');
+  document.getElementById('wc-dec-result').innerHTML = '';
+  try {
+    const r = await api('/api/workkey/decrypt', {
+      dir: document.getElementById('wc-root').value,
+      workkey: document.getElementById('wc-file').value,
+      ciphertextB64: document.getElementById('wc-cipher').value
+    });
+    let html = r.ok
+      ? kcvBlock(r.name, r.kcv) + block('明文', r.plaintext, 'ok', true)
+      : block('错误', r.error || '未知错误', 'err');
+    document.getElementById('wc-dec-result').innerHTML = html;
+  } catch (e) {
+    document.getElementById('wc-dec-result').innerHTML = block('请求失败', e, 'err');
+  } finally {
+    busy('wc-dec-btn', false, '解 密');
   }
 }
 </script>

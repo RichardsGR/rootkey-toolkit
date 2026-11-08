@@ -94,6 +94,45 @@ class WebUiServerTest {
     }
 
     @Test
+    void workKeyRoundTripThroughHttp(@TempDir Path dir) throws Exception {
+        // 准备根密钥组件
+        com.metrace.rootkey.core.RootKeyGenerator.generate(dir, "http-wk-root", false).close();
+        WebUiServer server = new WebUiServer(0);
+        server.start();
+        try {
+            String base = "http://127.0.0.1:" + server.port();
+            String dirJson = jsonEscape(dir.toString());
+
+            // 生成
+            Map<String, String> gen = Json.parseFlatObject(post(base + "/api/workkey/generate",
+                    "{\"dir\":\"" + dirJson + "\",\"name\":\"order-db\"}"));
+            assertTrue(Boolean.parseBoolean(gen.get("ok")), "workkey generate 应成功: " + gen.get("error"));
+            assertEquals("order-db", gen.get("name"));
+            assertEquals("http-wk-root", gen.get("rootKeyId"));
+            assertTrue(Files.exists(dir.resolve("order-db.workkey")));
+
+            // 还原校验
+            Map<String, String> res = Json.parseFlatObject(post(base + "/api/workkey/restore",
+                    "{\"dir\":\"" + dirJson + "\",\"workkey\":\"" + gen.get("file") + "\"}"));
+            assertTrue(Boolean.parseBoolean(res.get("ok")), "workkey restore 应成功: " + res.get("error"));
+            assertEquals(gen.get("kcv"), res.get("kcv"));
+
+            // 加密 → 解密
+            Map<String, String> enc = Json.parseFlatObject(post(base + "/api/workkey/encrypt",
+                    "{\"dir\":\"" + dirJson + "\",\"workkey\":\"" + gen.get("file")
+                            + "\",\"plaintext\":\"网页工作密钥测试\"}"));
+            assertTrue(Boolean.parseBoolean(enc.get("ok")), "workkey encrypt 应成功: " + enc.get("error"));
+            Map<String, String> dec = Json.parseFlatObject(post(base + "/api/workkey/decrypt",
+                    "{\"dir\":\"" + dirJson + "\",\"workkey\":\"" + gen.get("file")
+                            + "\",\"ciphertextB64\":\"" + enc.get("ciphertextB64") + "\"}"));
+            assertTrue(Boolean.parseBoolean(dec.get("ok")), "workkey decrypt 应成功: " + dec.get("error"));
+            assertEquals("网页工作密钥测试", dec.get("plaintext"));
+        } finally {
+            server.stop();
+        }
+    }
+
+    @Test
     void indexPageServed() throws Exception {
         WebUiServer server = new WebUiServer(0);
         server.start();

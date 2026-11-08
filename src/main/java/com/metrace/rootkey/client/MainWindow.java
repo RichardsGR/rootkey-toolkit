@@ -61,6 +61,8 @@ final class MainWindow extends JFrame {
         tabs.addTab("② 校验与还原", buildVerifyTab());
         tabs.addTab("③ 加密", buildEncryptTab());
         tabs.addTab("④ 解密", buildDecryptTab());
+        tabs.addTab("⑤ 生成工作密钥", buildWorkKeyGenTab());
+        tabs.addTab("⑥ 工作密钥·加解密", buildWorkKeyCryptTab());
 
         JPanel root = new JPanel(new BorderLayout());
         root.add(tabs, BorderLayout.CENTER);
@@ -316,7 +318,217 @@ final class MainWindow extends JFrame {
         }.execute();
     }
 
+    // ================================================================== ⑤ 生成工作密钥
+
+    private JPanel buildWorkKeyGenTab() {
+        final JTextField rootDir = new JTextField();
+        final JTextField name = new JTextField();
+        final JTextField outFile = new JTextField();
+        final JCheckBox force = new JCheckBox("目标文件已存在时覆盖");
+        final JButton go = new JButton("生 成");
+        final JTextArea result = monoArea(10);
+
+        go.addActionListener(e -> {
+            Path root = requireDir(rootDir.getText(), "根密钥组件目录");
+            if (root == null || requireNonEmpty(name.getText(), "工作密钥名称") == null) {
+                return;
+            }
+            go.setEnabled(false);
+            status("生成工作密钥中…");
+            final Path rootPath = root;
+            final String keyName = name.getText().trim();
+            final Path out = outFile.getText().trim().isEmpty()
+                    ? rootPath.getParent() == null
+                      ? Paths.get(keyName + RootKeyConstants.WORKKEY_FILE_SUFFIX)
+                      : rootPath.resolveSibling(keyName + RootKeyConstants.WORKKEY_FILE_SUFFIX)
+                    : Paths.get(outFile.getText().trim());
+            final boolean f = force.isSelected();
+            new SwingWorker<String, Void>() {
+                @Override
+                protected String doInBackground() throws Exception {
+                    try (RootKeyManager rootMgr = new RootKeyManager(rootConfigFor(rootPath));
+                         com.metrace.rootkey.workkey.WorkKeyManager.Generated g =
+                                 com.metrace.rootkey.workkey.WorkKeyManager.generate(out, keyName, rootMgr, f)) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("名称    : ").append(g.name()).append('\n');
+                        sb.append("KCV     : ").append(g.kcvHex()).append('\n');
+                        sb.append("文件    : ").append(g.file()).append('\n');
+                        sb.append("根密钥  : keyId=").append(rootMgr.keyId())
+                                .append(", KCV=").append(rootMgr.kcv()).append('\n');
+                        sb.append("\n.workkey 文件可分发业务侧；没有根密钥四组件无法还原其中的密钥。");
+                        return sb.toString();
+                    }
+                }
+
+                @Override
+                protected void done() {
+                    go.setEnabled(true);
+                    try {
+                        result.setForeground(OK_GREEN);
+                        result.setText(get());
+                        status("工作密钥已生成（文件只含密文材料）");
+                    } catch (Exception ex) {
+                        result.setForeground(ERR_RED);
+                        result.setText("生成失败：" + rootMessage(ex));
+                        status("生成失败");
+                    }
+                }
+            }.execute();
+        });
+
+        return formPanel(
+                rowWithBrowse("根密钥组件目录（内含 a.comp ~ d.comp）", rootDir, browseButton(rootDir)),
+                rowWithBrowse("工作密钥名称", name, null),
+                rowWithBrowse("输出文件（留空默认 <名称>.workkey）", outFile, null),
+                force,
+                go,
+                sectionTitle("生成结果"),
+                new JScrollPane(result)
+        );
+    }
+
+    // ================================================================== ⑥ 工作密钥·加解密
+
+    private JPanel buildWorkKeyCryptTab() {
+        final JTextField rootDir = new JTextField();
+        final JTextField wkFile = new JTextField();
+        final JTextArea plain = new JTextArea(3, 40);
+        plain.setLineWrap(true);
+        final JTextArea cipherIn = monoArea(3);
+        final JTextArea cipherOut = monoArea(4);
+        final JTextArea plainOut = new JTextArea(3, 40);
+        plainOut.setEditable(false);
+        plainOut.setLineWrap(true);
+        final JButton verifyBtn = new JButton("还 原 校 验");
+        final JButton encBtn = new JButton("加 密");
+        final JButton decBtn = new JButton("解 密");
+
+        verifyBtn.addActionListener(e -> {
+            Path root = requireDir(rootDir.getText(), "根密钥组件目录");
+            Path wk = requireWkFile(wkFile.getText());
+            if (root == null || wk == null) {
+                return;
+            }
+            runWkVerify(verifyBtn, root, wk, cipherOut);
+        });
+        encBtn.addActionListener(e -> {
+            Path root = requireDir(rootDir.getText(), "根密钥组件目录");
+            Path wk = requireWkFile(wkFile.getText());
+            if (root == null || wk == null || requireNonEmpty(plain.getText(), "明文") == null) {
+                return;
+            }
+            runWkCrypto(encBtn, root, wk, false, plain.getText(), cipherOut);
+        });
+        decBtn.addActionListener(e -> {
+            Path root = requireDir(rootDir.getText(), "根密钥组件目录");
+            Path wk = requireWkFile(wkFile.getText());
+            if (root == null || wk == null || requireNonEmpty(cipherIn.getText(), "密文") == null) {
+                return;
+            }
+            runWkCrypto(decBtn, root, wk, true, cipherIn.getText(), plainOut);
+        });
+
+        return formPanel(
+                rowWithBrowse("根密钥组件目录", rootDir, browseButton(rootDir)),
+                rowWithBrowse("工作密钥文件（.workkey）", wkFile, browseFileButton(wkFile)),
+                verifyBtn,
+                labeledArea("明文（加密）", plain),
+                encBtn,
+                sectionTitle("密文输出（Base64）"),
+                new JScrollPane(cipherOut),
+                labeledArea("密文输入（解密，Base64）", cipherIn),
+                decBtn,
+                sectionTitle("明文输出"),
+                new JScrollPane(plainOut)
+        );
+    }
+
+    /** 校验工作密钥文件输入 */
+    private Path requireWkFile(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            warn("请先选择工作密钥文件");
+            return null;
+        }
+        Path p = Paths.get(text.trim());
+        if (!Files.isReadable(p)) {
+            warn("工作密钥文件不存在或不可读: " + p);
+            return null;
+        }
+        return p;
+    }
+
+    /** 后台还原校验：显示工作密钥名称与 KCV */
+    private void runWkVerify(final JButton go, final Path rootPath, final Path wkPath, final JTextArea result) {
+        go.setEnabled(false);
+        status("还原校验中…");
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                try (RootKeyManager rootMgr = new RootKeyManager(rootConfigFor(rootPath));
+                     com.metrace.rootkey.workkey.WorkKeySecret s =
+                             com.metrace.rootkey.workkey.WorkKeyManager.restore(wkPath, rootMgr)) {
+                    return "还原成功: 名称=" + s.name() + ", KCV=" + s.kcvHex();
+                }
+            }
+
+            @Override
+            protected void done() {
+                go.setEnabled(true);
+                try {
+                    String s = get();
+                    result.setForeground(OK_GREEN);
+                    result.setText(s);
+                    status("工作密钥还原校验通过");
+                } catch (Exception ex) {
+                    result.setForeground(ERR_RED);
+                    result.setText(rootMessage(ex));
+                    status("还原校验失败");
+                }
+            }
+        }.execute();
+    }
+
+    /** 后台工作密钥加解密：decrypt=true 时 input 为 Base64 密文，否则为明文 */
+    private void runWkCrypto(final JButton go, final Path rootPath, final Path wkPath,
+                             final boolean decrypt, final String input, final JTextArea result) {
+        go.setEnabled(false);
+        status(decrypt ? "解密中…" : "加密中…");
+        new SwingWorker<String[], Void>() {
+            @Override
+            protected String[] doInBackground() throws Exception {
+                try (RootKeyManager rootMgr = new RootKeyManager(rootConfigFor(rootPath));
+                     com.metrace.rootkey.workkey.WorkKeyManager wkm =
+                             new com.metrace.rootkey.workkey.WorkKeyManager(rootMgr, wkPath)) {
+                    String out = decrypt ? wkm.decryptFromBase64(input) : wkm.encryptToBase64(input);
+                    return new String[]{out, wkm.name(), wkm.kcv()};
+                }
+            }
+
+            @Override
+            protected void done() {
+                go.setEnabled(true);
+                try {
+                    String[] r = get();
+                    result.setForeground(decrypt ? OK_GREEN : new Color(0x0F172A));
+                    result.setText(r[0]);
+                    status("完成（名称=" + r[1] + ", KCV=" + r[2] + "）");
+                } catch (Exception ex) {
+                    result.setForeground(ERR_RED);
+                    result.setText("失败：" + rootMessage(ex));
+                    status("操作失败");
+                }
+            }
+        }.execute();
+    }
+
     // ================================================================== UI 构件
+
+    /** 由组件目录构建根密钥配置（a.comp ~ d.comp） */
+    private static RootKeyConfig rootConfigFor(Path rootDir) {
+        return RootKeyConfig.builder()
+                .a(rootDir.resolve("a.comp")).b(rootDir.resolve("b.comp"))
+                .c(rootDir.resolve("c.comp")).d(rootDir.resolve("d.comp")).build();
+    }
 
     private JPanel formPanel(javax.swing.JComponent... items) {
         JPanel p = new JPanel(new GridBagLayout());
@@ -366,10 +578,18 @@ final class MainWindow extends JFrame {
     }
 
     private JButton browseButton(final JTextField target) {
+        return chooserButton(target, JFileChooser.DIRECTORIES_ONLY);
+    }
+
+    private JButton browseFileButton(final JTextField target) {
+        return chooserButton(target, JFileChooser.FILES_ONLY);
+    }
+
+    private JButton chooserButton(final JTextField target, final int mode) {
         JButton b = new JButton("浏览…");
         b.addActionListener(e -> {
             JFileChooser fc = new JFileChooser();
-            fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            fc.setFileSelectionMode(mode);
             if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
                 target.setText(fc.getSelectedFile().getAbsolutePath());
             }

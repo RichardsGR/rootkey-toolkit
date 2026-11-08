@@ -184,6 +184,8 @@ try (RootKeyManager root = RootKeyManager.fromConfigFile(Paths.get("/etc/app/roo
 
 `.workkey` 文件只含被根密钥加密后的密钥材料，**泄露它不直接泄露密钥**（没有四组件还原不出 WorkKey），但仍请妥善保管；文件权限默认 600。
 
+Web 管理台（`rootkey ui`）与桌面客户端（`rootkey client`）同样提供了工作密钥的图形化页签：生成（可指定名称）、还原校验、加解密，行为与 CLI 完全一致。
+
 ## 五、设计说明
 
 ### 分片方案（4-of-4 XOR）
